@@ -68,7 +68,7 @@ const mockFamily = {
   name: '우리 가족',
   inviteCode: 'MOCKCODE',
   createdById: 'db-user-id',
-  createdAt: new Date(),
+  createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000), // 25시간 전 (24시간 체크 통과)
   memberships: [],
 };
 
