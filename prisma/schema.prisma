@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 String             @id @default(uuid())
+  userId             String             @unique @map("user_id")
+  email              String             @unique
+  name               String
+  profileImageUrl    String?            @map("profile_image_url")
+  passwordHash       String?            @map("password_hash")
+  role               UserRole           @default(OTHER)
+  hearts             Int                @default(0)
+  lastHeartGrantedAt DateTime?          @map("last_heart_granted_at")
+  familyId           String?            @map("family_id")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  moodId             String?            @default("loved") @map("mood_id")
+  apnsToken          String?            @map("apns_token")
+  answers            Answer[]
+  memberships        FamilyMembership[]
+  moodRecords        MoodRecord[]
+  notifications      Notification[]
+  accessLogs         UserAccessLog[]
+  family             Family?            @relation(fields: [familyId], references: [id])
+
+  @@map("users")
+}
+
+model Family {
+  id             String             @id @default(uuid())
+  name           String
+  inviteCode     String             @unique @map("invite_code")
+  createdById    String             @map("created_by_id")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+  dailyQuestions DailyQuestion[]
+  memberships    FamilyMembership[]
+  members        User[]
+
+  @@map("families")
+}
+
+model FamilyMembership {
+  id                String    @id @default(uuid())
+  userId            String    @map("user_id")
+  familyId          String    @map("family_id")
+  role              UserRole  @default(OTHER)
+  joinedAt          DateTime  @default(now()) @map("joined_at")
+  hearts            Int       @default(5)
+  nickname          String?
+  colorId           String?   @default("loved") @map("color_id")
+  nicknameChangedAt DateTime? @map("nickname_changed_at")
+  skippedDate       DateTime? @map("skipped_date") @db.Date
+  family            Family    @relation(fields: [familyId], references: [id])
+  user              User      @relation(fields: [userId], references: [id])
+
+  @@unique([userId, familyId])
+  @@map("family_memberships")
+}
+
+model Question {
+  id             String           @id @default(uuid())
+  content        String
+  category       QuestionCategory
+  isActive       Boolean          @default(true) @map("is_active")
+  isCustom       Boolean          @default(false) @map("is_custom")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  answers        Answer[]
+  dailyQuestions DailyQuestion[]
+
+  @@map("questions")
+}
+
+model DailyQuestion {
+  id         String    @id @default(uuid())
+  questionId String    @map("question_id")
+  familyId   String    @map("family_id")
+  date       DateTime  @db.Date
+  isSkipped  Boolean   @default(false) @map("is_skipped")
+  skippedAt  DateTime? @map("skipped_at")
+  family     Family    @relation(fields: [familyId], references: [id])
+  question   Question  @relation(fields: [questionId], references: [id])
+
+  @@unique([familyId, date])
+  @@map("daily_questions")
+}
+
+model UserAccessLog {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@map("user_access_logs")
+}
+
+model Answer {
+  id         String   @id @default(uuid())
+  content    String
+  imageUrl   String?  @map("image_url")
+  userId     String   @map("user_id")
+  questionId String   @map("question_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  moodId     String?  @map("mood_id")
+  question   Question @relation(fields: [questionId], references: [id])
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, questionId])
+  @@map("answers")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String           @map("user_id")
+  type      NotificationType
+  title     String
+  body      String
+  isRead    Boolean          @default(false) @map("is_read")
+  createdAt DateTime         @default(now()) @map("created_at")
+  familyId  String?          @map("family_id")
+  user      User             @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+model MoodRecord {
+  id     String   @id @default(uuid())
+  userId String   @map("user_id")
+  mood   String
+  note   String?
+  date   DateTime @db.Date
+  user   User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, date])
+  @@map("mood_records")
+}
+
+enum UserRole {
+  FATHER
+  MOTHER
+  SON
+  DAUGHTER
+  OTHER
+}
+
+enum QuestionCategory {
+  DAILY
+  MEMORY
+  VALUE
+  DREAM
+  GRATITUDE
+  SPECIAL
+}
+
+enum NotificationType {
+  NEW_QUESTION
+  MEMBER_ANSWERED
+  ALL_ANSWERED
+  ANSWER_REQUEST
+  BADGE_EARNED
+}

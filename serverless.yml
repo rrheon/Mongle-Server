@@ -1,0 +1,100 @@
+service: famtree-api
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  stage: ${opt:stage, 'dev'}
+  region: ap-northeast-2
+  memorySize: 512
+  timeout: 30
+
+  environment:
+    NODE_ENV: ${self:custom.nodeEnv.${self:provider.stage}, 'development'}
+    DATABASE_URL: ${env:DATABASE_URL, ''}
+    JWT_SECRET: ${env:JWT_SECRET}
+    JWT_REFRESH_SECRET: ${env:JWT_REFRESH_SECRET}
+    COGNITO_USER_POOL_ID: ${env:COGNITO_USER_POOL_ID, ''}
+    COGNITO_CLIENT_ID: ${env:COGNITO_CLIENT_ID, ''}
+    COGNITO_REGION: ${self:provider.region}
+
+  # IAM 권한 (최소 권한 원칙)
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - cognito-idp:AdminGetUser
+            - cognito-idp:AdminDeleteUser
+            - cognito-idp:ListUsers
+          Resource:
+            - arn:aws:cognito-idp:${self:provider.region}:*:userpool/*
+
+  # API Gateway CORS 설정
+  httpApi:
+    cors:
+      allowedOrigins:
+        - '*'
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+      allowedMethods:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+        - OPTIONS
+
+plugins:
+  - serverless-plugin-typescript
+  - serverless-offline
+
+custom:
+  serverless-offline:
+    httpPort: 3000
+    lambdaPort: 3002
+  nodeEnv:
+    prod: production
+    dev: development
+
+functions:
+  # Main API Handler
+  api:
+    handler: src/lambda.handler
+    events:
+      - httpApi:
+          method: '*'
+          path: '/{proxy+}'
+      - httpApi:
+          method: '*'
+          path: '/'
+
+  # Swagger UI (prod에서는 app.ts의 NODE_ENV=production 체크로 라우트 미등록됨)
+  swagger:
+    handler: src/swagger.handler
+    events:
+      - httpApi:
+          method: GET
+          path: /docs
+      - httpApi:
+          method: GET
+          path: /docs/{proxy+}
+
+  # 매일 자정 질문 배정 스케줄러 (KST 00:00 = UTC 15:00)
+  dailyQuestionScheduler:
+    handler: src/scheduler.handler
+    timeout: 60
+    events:
+      - schedule:
+          rate: cron(0 15 * * ? *)
+          enabled: true
+
+# 리소스 정의 (선택사항 - 별도 CloudFormation으로 관리 권장)
+# resources:
+#   Resources:
+#     CognitoUserPool:
+#       Type: AWS::Cognito::UserPool
+#       Properties:
+#         UserPoolName: famtree-${self:provider.stage}-user-pool

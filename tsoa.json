@@ -1,0 +1,39 @@
+{
+  "entryFile": "src/app.ts",
+  "noImplicitAdditionalProperties": "throw-on-extras",
+  "controllerPathGlobs": ["src/controllers/**/*.ts"],
+  "spec": {
+    "outputDirectory": "dist",
+    "specVersion": 3,
+    "securityDefinitions": {
+      "jwt": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "AWS Cognito JWT Token"
+      }
+    },
+    "info": {
+      "title": "FamTree API",
+      "version": "1.0.0",
+      "description": "가족 소통 앱 FamTree의 백엔드 API",
+      "contact": {
+        "name": "FamTree Team",
+        "email": "support@famtree.app"
+      }
+    },
+    "tags": [
+      { "name": "Auth", "description": "인증 관련 API" },
+      { "name": "Users", "description": "사용자 관련 API" },
+      { "name": "Families", "description": "가족 관련 API" },
+      { "name": "Questions", "description": "질문 관련 API" },
+      { "name": "Answers", "description": "답변 관련 API" },
+      { "name": "Tree", "description": "나무 성장 관련 API" }
+    ]
+  },
+  "routes": {
+    "routesDir": "src/routes",
+    "middleware": "express",
+    "authenticationModule": "src/middleware/auth"
+  }
+}

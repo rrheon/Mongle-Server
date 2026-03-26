@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>몽글 초대</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(180deg, #FFF8F0 0%, #EFF8F1 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      background: white;
+      border-radius: 20px;
+      padding: 40px 32px;
+      max-width: 360px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+    }
+    .logo { font-size: 48px; margin-bottom: 16px; }
+    h1 { font-size: 24px; font-weight: 700; color: #1A1A1A; margin-bottom: 8px; }
+    .subtitle { font-size: 15px; color: #888; margin-bottom: 32px; line-height: 1.5; }
+    .code-box {
+      background: #F0F9F2;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 32px;
+    }
+    .code-label { font-size: 12px; color: #56A96B; font-weight: 600; margin-bottom: 8px; }
+    .code {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: 6px;
+      color: #56A96B;
+    }
+    .open-btn {
+      display: block;
+      width: 100%;
+      padding: 16px;
+      background: #56A96B;
+      color: white;
+      border: none;
+      border-radius: 14px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      margin-bottom: 12px;
+    }
+    .open-btn:active { opacity: 0.8; }
+    .hint { font-size: 12px; color: #AAA; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">🌿</div>
+    <h1>몽글 초대</h1>
+    <p class="subtitle" id="inviteText">가족이 초대 링크를 보냈어요.<br>몽글에서 함께해요!</p>
+    <div class="code-box">
+      <div class="code-label">초대 코드</div>
+      <div class="code" id="inviteCode">--------</div>
+    </div>
+    <a class="open-btn" id="openAppBtn" href="#">앱에서 열기</a>
+    <p class="hint">앱이 설치되어 있지 않다면<br>App Store 또는 Google Play에서 다운로드해 주세요.</p>
+  </div>
+
+  <script>
+    const pathParts = window.location.pathname.split('/');
+    const code = pathParts[pathParts.length - 1]?.toUpperCase() || '';
+    if (code) {
+      document.getElementById('inviteCode').textContent = code;
+      document.getElementById('openAppBtn').href = 'monggle://join/' + code;
+    }
+  </script>
+</body>
+</html>
