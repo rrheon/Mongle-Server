@@ -13,6 +13,9 @@ dist/
 .env.local
 .env.*.local
 
+# Secrets
+*.pem
+
 # IDE
 .idea/
 .vscode/
