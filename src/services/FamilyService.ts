@@ -150,37 +150,39 @@ export class FamilyService {
    * 가족 상세 조회 (권한 확인 포함)
    */
   async getFamily(userId: string, familyId: string): Promise<FamilyResponse> {
+    const normalizedFamilyId = familyId.toLowerCase();
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) throw Errors.notFound('사용자');
 
     const membership = await prisma.familyMembership.findUnique({
-      where: { userId_familyId: { userId: user.id, familyId } },
+      where: { userId_familyId: { userId: user.id, familyId: normalizedFamilyId } },
     });
-    if (!membership && user.familyId !== familyId) {
+    if (!membership && user.familyId !== normalizedFamilyId) {
       throw Errors.forbidden('해당 가족에 대한 접근 권한이 없습니다.');
     }
 
-    return this.getFamilyWithMembers(familyId);
+    return this.getFamilyWithMembers(normalizedFamilyId);
   }
 
   /**
    * 가족 구성원 목록
    */
   async getFamilyMembers(userId: string, familyId: string): Promise<FamilyMembersResponse> {
+    const normalizedFamilyId = familyId.toLowerCase();
     const user = await prisma.user.findUnique({ where: { userId } });
 
     const membership = user
       ? await prisma.familyMembership.findUnique({
-          where: { userId_familyId: { userId: user.id, familyId } },
+          where: { userId_familyId: { userId: user.id, familyId: normalizedFamilyId } },
         })
       : null;
 
-    if (!user || (!membership && user.familyId !== familyId)) {
+    if (!user || (!membership && user.familyId !== normalizedFamilyId)) {
       throw Errors.forbidden('해당 가족에 대한 접근 권한이 없습니다.');
     }
 
     const memberships = await prisma.familyMembership.findMany({
-      where: { familyId },
+      where: { familyId: normalizedFamilyId },
       include: { user: true },
       orderBy: { joinedAt: 'asc' },
     });
@@ -337,17 +339,17 @@ export class FamilyService {
 
     const family = await prisma.family.findUnique({ where: { id: targetFamilyId } });
 
-    // 그룹 생성 후 24시간 이내에는 해제 불가 (반복 생성/삭제 방지)
-    if (family) {
-      const hoursSinceCreation = (Date.now() - family.createdAt.getTime()) / (1000 * 60 * 60);
+    // 가족 생성자인 경우
+    if (family?.createdById === user.id) {
+      // 그룹 생성 후 24시간 이내에는 그룹 삭제 불가 (반복 생성/삭제 방지)
+      // 위임 후 나가기(일반 멤버)는 이 제한에 해당하지 않음
+      const hoursSinceCreation = family
+        ? (Date.now() - family.createdAt.getTime()) / (1000 * 60 * 60)
+        : 24;
       if (hoursSinceCreation < 24) {
         const hoursLeft = Math.ceil(24 - hoursSinceCreation);
         throw Errors.forbidden(`그룹 생성 후 24시간이 지나야 그룹을 해제할 수 있습니다. (${hoursLeft}시간 후 가능)`);
       }
-    }
-
-    // 가족 생성자인 경우
-    if (family?.createdById === user.id) {
       const memberCount = await prisma.familyMembership.count({
         where: { familyId: targetFamilyId },
       });
@@ -398,22 +400,25 @@ export class FamilyService {
    * 방장 위임 — 현재 방장이 다른 멤버에게 방장 권한을 넘김
    */
   async transferCreator(userId: string, newCreatorId: string): Promise<void> {
+    // UUID 대소문자 정규화 (iOS는 대문자 UUID를 전송)
+    const normalizedNewCreatorId = newCreatorId.toLowerCase();
+
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user || !user.familyId) throw Errors.badRequest('가족에 속해 있지 않습니다.');
 
     const family = await prisma.family.findUnique({ where: { id: user.familyId } });
     if (!family) throw Errors.notFound('가족');
     if (family.createdById !== user.id) throw Errors.forbidden('방장만 위임할 수 있습니다.');
-    if (newCreatorId === user.id) throw Errors.badRequest('자기 자신에게 위임할 수 없습니다.');
+    if (normalizedNewCreatorId === user.id) throw Errors.badRequest('자기 자신에게 위임할 수 없습니다.');
 
     const newCreatorMembership = await prisma.familyMembership.findUnique({
-      where: { userId_familyId: { userId: newCreatorId, familyId: user.familyId } },
+      where: { userId_familyId: { userId: normalizedNewCreatorId, familyId: user.familyId } },
     });
     if (!newCreatorMembership) throw Errors.notFound('대상 구성원');
 
     await prisma.family.update({
       where: { id: user.familyId },
-      data: { createdById: newCreatorId },
+      data: { createdById: normalizedNewCreatorId },
     });
   }
 
@@ -421,6 +426,9 @@ export class FamilyService {
    * 방장이 가족 구성원을 내보내기
    */
   async kickMember(adminUserId: string, targetMemberId: string): Promise<void> {
+    // UUID 대소문자 정규화 (iOS는 대문자 UUID를 전송)
+    const normalizedTargetId = targetMemberId.toLowerCase();
+
     const admin = await prisma.user.findUnique({
       where: { userId: adminUserId },
       include: { family: true },
@@ -436,11 +444,11 @@ export class FamilyService {
     }
 
     // 자기 자신은 내보낼 수 없음
-    if (targetMemberId === admin.id) throw Errors.badRequest('자기 자신을 내보낼 수 없습니다.');
+    if (normalizedTargetId === admin.id) throw Errors.badRequest('자기 자신을 내보낼 수 없습니다.');
 
     // FamilyMembership 기준으로 대상 구성원 확인
     const targetMembership = await prisma.familyMembership.findUnique({
-      where: { userId_familyId: { userId: targetMemberId, familyId } },
+      where: { userId_familyId: { userId: normalizedTargetId, familyId } },
       include: { user: true },
     });
     if (!targetMembership) throw Errors.notFound('대상 가족 구성원');
@@ -448,17 +456,17 @@ export class FamilyService {
     await prisma.$transaction(async (tx) => {
       // FamilyMembership 레코드 삭제
       await tx.familyMembership.delete({
-        where: { userId_familyId: { userId: targetMemberId, familyId } },
+        where: { userId_familyId: { userId: normalizedTargetId, familyId } },
       });
 
       // 대상 멤버의 활성 가족이 이 가족이었으면 다른 가족으로 전환
       if (targetMembership.user.familyId === familyId) {
         const nextMembership = await tx.familyMembership.findFirst({
-          where: { userId: targetMemberId, familyId: { not: familyId } },
+          where: { userId: normalizedTargetId, familyId: { not: familyId } },
           orderBy: { joinedAt: 'asc' },
         });
         await tx.user.update({
-          where: { id: targetMemberId },
+          where: { id: normalizedTargetId },
           data: {
             familyId: nextMembership?.familyId ?? null,
             role: nextMembership?.role ?? 'OTHER',
