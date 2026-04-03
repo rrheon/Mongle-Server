@@ -59,7 +59,6 @@ model FamilyMembership {
   colorId           String?   @default("loved") @map("color_id")
   nicknameChangedAt DateTime? @map("nickname_changed_at")
   skippedDate       DateTime? @map("skipped_date") @db.Date
-  lastHeartGrantedAt DateTime? @map("last_heart_granted_at")
   family            Family    @relation(fields: [familyId], references: [id])
   user              User      @relation(fields: [userId], references: [id])
 

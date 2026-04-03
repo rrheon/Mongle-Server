@@ -72,40 +72,6 @@ export class UserService {
   }
 
   /**
-   * 그룹별 일일 접속 하트 지급 (자정 기준 리셋)
-   * - FamilyMembership.lastHeartGrantedAt으로 그룹별 개별 체크
-   * - 이미 오늘 수령한 경우 alreadyClaimed: true 반환
-   */
-  async claimDailyHeart(userId: string): Promise<{ heartsGranted: number; heartsRemaining: number; alreadyClaimed: boolean }> {
-    const user = await prisma.user.findUnique({ where: { userId } });
-    if (!user) throw Errors.notFound('사용자');
-    if (!user.familyId) throw Errors.badRequest('가족에 속해 있지 않습니다.');
-
-    const membership = await prisma.familyMembership.findUnique({
-      where: { userId_familyId: { userId: user.id, familyId: user.familyId } },
-    });
-    if (!membership) throw Errors.notFound('가족 멤버십');
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const alreadyClaimed = membership.lastHeartGrantedAt != null && membership.lastHeartGrantedAt >= today;
-    if (alreadyClaimed) {
-      return { heartsGranted: 0, heartsRemaining: membership.hearts, alreadyClaimed: true };
-    }
-
-    const updated = await prisma.familyMembership.update({
-      where: { id: membership.id },
-      data: {
-        hearts: { increment: 1 },
-        lastHeartGrantedAt: new Date(),
-      },
-    });
-
-    return { heartsGranted: 1, heartsRemaining: updated.hearts, alreadyClaimed: false };
-  }
-
-  /**
    * 사용자 정보 수정
    * - name, role → 현재 활성 가족 FamilyMembership 업데이트 (그룹별)
    * - moodId, profileImageUrl → 글로벌 User 업데이트
