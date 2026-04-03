@@ -102,7 +102,7 @@ export class QuestionService {
     return memberships.every(
       (m) =>
         answeredUserIds.has(m.userId) ||
-        (m.skippedDate !== null && m.skippedDate.getTime() === date.getTime())
+        this.isSameDate(m.skippedDate, date)
     );
   }
 
@@ -154,9 +154,7 @@ export class QuestionService {
     if (!membership) throw Errors.notFound('멤버십');
 
     // 이미 해당 질문을 패스했는지 확인
-    const alreadySkipped =
-      membership.skippedDate !== null &&
-      membership.skippedDate.getTime() === questionDate.getTime();
+    const alreadySkipped = this.isSameDate(membership.skippedDate, questionDate);
     if (alreadySkipped) {
       throw Errors.conflict('이미 질문을 패스했습니다.');
     }
@@ -290,9 +288,7 @@ export class QuestionService {
         moodId: (a as any).moodId ?? null,
       }));
 
-      const hasMySkipped =
-        myMembership?.skippedDate != null &&
-        myMembership.skippedDate.getTime() === dq.date.getTime();
+      const hasMySkipped = this.isSameDate(myMembership?.skippedDate, dq.date);
 
       const answeredUserIds = new Set(answers.map((a) => a.userId));
       const memberAnswerStatuses = familyMemberships.map((m) => {
@@ -304,9 +300,7 @@ export class QuestionService {
             status: 'answered' as const,
           };
         }
-        const skipped =
-          m.skippedDate !== null &&
-          m.skippedDate.getTime() === dq.date.getTime();
+        const skipped = this.isSameDate(m.skippedDate, dq.date);
         return {
           userId: m.userId,
           userName: m.nickname ?? m.user.name,
@@ -472,6 +466,14 @@ export class QuestionService {
     return new Date(kstDateStr + 'T00:00:00.000Z');
   }
 
+  /**
+   * @db.Date 필드의 안전한 날짜 비교 (타임존 차이로 인한 getTime() 불일치 방지)
+   */
+  private isSameDate(a: Date | null | undefined, b: Date | null | undefined): boolean {
+    if (!a || !b) return false;
+    return a.toISOString().split('T')[0] === b.toISOString().split('T')[0];
+  }
+
   private async toDailyQuestionResponse(
     dailyQuestion: {
       id: string;
@@ -512,10 +514,7 @@ export class QuestionService {
     const answeredUserIds = new Set(answers.map((a) => a.userId));
 
     // 오늘 패스 여부: membership.skippedDate가 이 dailyQuestion의 날짜와 같으면 true
-    const hasMySkipped =
-      myMembership?.skippedDate !== null &&
-      myMembership?.skippedDate !== undefined &&
-      myMembership.skippedDate.getTime() === dailyQuestion.date.getTime();
+    const hasMySkipped = this.isSameDate(myMembership?.skippedDate, dailyQuestion.date);
 
     // 각 멤버의 답변/스킵/미답변 상태
     const memberAnswerStatuses = memberships.map((m) => {
@@ -527,9 +526,7 @@ export class QuestionService {
           status: 'answered' as const,
         };
       }
-      const skipped =
-        m.skippedDate !== null &&
-        m.skippedDate.getTime() === dailyQuestion.date.getTime();
+      const skipped = this.isSameDate(m.skippedDate, dailyQuestion.date);
       return {
         userId: m.userId,
         userName: m.nickname ?? m.user.name,

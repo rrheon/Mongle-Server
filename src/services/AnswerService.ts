@@ -199,9 +199,9 @@ export class AnswerService {
         };
       }
       const skipped =
-        dailyQuestion &&
-        m.skippedDate !== null &&
-        m.skippedDate.getTime() === dailyQuestion.date.getTime();
+        dailyQuestion != null &&
+        m.skippedDate != null &&
+        m.skippedDate.toISOString().split('T')[0] === dailyQuestion.date.toISOString().split('T')[0];
       return {
         userId: m.userId,
         userName: m.nickname ?? m.user.name,
