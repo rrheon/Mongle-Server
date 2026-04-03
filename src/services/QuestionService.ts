@@ -499,14 +499,11 @@ export class QuestionService {
     ]);
     const memberIds = memberships.map((m) => m.userId);
 
-    // getHistory와 동일한 KST 날짜 범위 필터 적용 (다른 날짜의 같은 질문 답변 누출 방지)
-    const kstDayStart = new Date(dailyQuestion.date.getTime() - 9 * 60 * 60 * 1000);
-    const kstDayEnd = new Date(dailyQuestion.date.getTime() + 15 * 60 * 60 * 1000);
+    // 가족 멤버의 답변 조회 (questionId + userId unique constraint로 중복 없음)
     const answers = await prisma.answer.findMany({
       where: {
         questionId: dailyQuestion.question.id,
         userId: { in: memberIds },
-        createdAt: { gte: kstDayStart, lt: kstDayEnd },
       },
       select: { userId: true },
     });

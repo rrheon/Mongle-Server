@@ -54,24 +54,27 @@ export class NudgeService {
     });
 
     // 재촉 알림 DB 저장 (대상 유저 알림함에 노출)
+    const senderNickname = senderMembership?.nickname ?? sender.name;
+    const senderColorId = senderMembership?.colorId ?? 'loved';
     await notificationService.createNotification(
       target.id,
       'ANSWER_REQUEST',
-      `${sender.name}님이 답변을 재촉했어요!`,
+      `${senderNickname}님이 답변을 재촉했어요!`,
       '오늘의 질문에 아직 답변하지 않았어요. 지금 바로 답변해보세요 🌿',
-      sender.familyId ?? undefined
+      sender.familyId ?? undefined,
+      senderColorId
     );
 
     // APNs 실시간 푸시 발송 (iOS)
     if (target.apnsToken) {
-      pushService.sendNudgePush(target.apnsToken, sender.name).catch(() => {});
+      pushService.sendNudgePush(target.apnsToken, senderNickname).catch(() => {});
     }
     // FCM 실시간 푸시 발송 (Android)
     if (target.fcmToken) {
       pushService.sendFcmPush(
         target.fcmToken,
         '재촉하기 알림',
-        `${sender.name}님이 오늘의 질문에 답변해달라고 합니다 🌿`,
+        `${senderNickname}님이 오늘의 질문에 답변해달라고 합니다 🌿`,
         'ANSWER_REQUEST'
       ).catch(() => {});
     }

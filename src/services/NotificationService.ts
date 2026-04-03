@@ -11,6 +11,7 @@ export interface NotificationDTO {
   body: string;
   isRead: boolean;
   createdAt: string;
+  colorId: string | null;
 }
 
 export class NotificationService {
@@ -68,12 +69,13 @@ export class NotificationService {
     type: NotificationType,
     title: string,
     body: string,
-    familyId?: string
+    familyId?: string,
+    colorId?: string
   ): Promise<void> {
-    await prisma.notification.create({ data: { userId, type, title, body, familyId: familyId ?? null } });
+    await prisma.notification.create({ data: { userId, type, title, body, familyId: familyId ?? null, colorId: colorId ?? null } });
   }
 
-  private toDTO(n: { id: string; userId: string; familyId: string | null; type: NotificationType; title: string; body: string; isRead: boolean; createdAt: Date }): NotificationDTO {
+  private toDTO(n: { id: string; userId: string; familyId: string | null; colorId?: string | null; type: NotificationType; title: string; body: string; isRead: boolean; createdAt: Date }): NotificationDTO {
     return {
       id: n.id,
       userId: n.userId,
@@ -83,6 +85,7 @@ export class NotificationService {
       body: n.body,
       isRead: n.isRead,
       createdAt: n.createdAt.toISOString(),
+      colorId: n.colorId ?? null,
     };
   }
 }

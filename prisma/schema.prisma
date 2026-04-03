@@ -129,6 +129,7 @@ model Notification {
   isRead    Boolean          @default(false) @map("is_read")
   createdAt DateTime         @default(now()) @map("created_at")
   familyId  String?          @map("family_id")
+  colorId   String?          @map("color_id")
   user      User             @relation(fields: [userId], references: [id])
 
   @@index([userId, createdAt(sort: Desc)])

@@ -46,14 +46,14 @@ export class PushNotificationService {
   }
 
   /** FCM 푸시 알림 발송 (Android) */
-  async sendFcmPush(fcmToken: string, title: string, body: string, type: string): Promise<void> {
+  async sendFcmPush(fcmToken: string, title: string, body: string, type: string, colorId?: string): Promise<void> {
     initFirebase();
     if (admin.apps.length === 0) return;
     try {
       await admin.messaging().send({
         token: fcmToken,
         notification: { title, body },
-        data: { type },
+        data: { type, ...(colorId && { colorId }) },
         android: { priority: 'high' },
       });
     } catch (e) {

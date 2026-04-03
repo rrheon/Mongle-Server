@@ -84,18 +84,25 @@ export class AnswerService {
       });
 
       // 가족 멤버(본인 제외)에게 답변 알림 발송
+      const senderMembership = await prisma.familyMembership.findUnique({
+        where: { userId_familyId: { userId: user.id, familyId: user.familyId } },
+        select: { nickname: true, colorId: true },
+      });
+      const senderNickname = senderMembership?.nickname ?? user.name;
+      const senderColorId = senderMembership?.colorId ?? data.moodId ?? 'loved';
+
       const otherMembers = await prisma.user.findMany({
         where: { familyId: user.familyId, id: { not: user.id } },
         select: { id: true, apnsToken: true, fcmToken: true },
       });
 
-      const title = `${user.name}님이 답변했어요!`;
+      const title = `${senderNickname}님이 답변했어요!`;
       const body = '오늘의 질문에 새 답변이 올라왔어요. 확인해보세요 🌿';
 
       for (const member of otherMembers) {
-        notificationService.createNotification(member.id, 'MEMBER_ANSWERED', title, body, user.familyId).catch(() => {});
+        notificationService.createNotification(member.id, 'MEMBER_ANSWERED', title, body, user.familyId, senderColorId).catch(() => {});
         if (member.apnsToken) pushService.sendApnsPush(member.apnsToken, title, body, 'MEMBER_ANSWERED').catch(() => {});
-        if (member.fcmToken) pushService.sendFcmPush(member.fcmToken, title, body, 'MEMBER_ANSWERED').catch(() => {});
+        if (member.fcmToken) pushService.sendFcmPush(member.fcmToken, title, body, 'MEMBER_ANSWERED', senderColorId).catch(() => {});
       }
     }
 
