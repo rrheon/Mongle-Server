@@ -37,6 +37,16 @@ export class AnswerService {
       throw Errors.notFound('질문');
     }
 
+    // 해당 질문이 사용자의 가족에 배정된 질문인지 검증
+    if (user.familyId) {
+      const dailyQuestion = await prisma.dailyQuestion.findFirst({
+        where: { questionId: normalizedQuestionId, familyId: user.familyId },
+      });
+      if (!dailyQuestion) {
+        throw Errors.badRequest('이 질문은 가족에 배정되지 않았습니다.');
+      }
+    }
+
     // 이미 답변했는지 확인
     const existingAnswer = await prisma.answer.findUnique({
       where: {
@@ -237,23 +247,33 @@ export class AnswerService {
       throw Errors.forbidden('본인의 답변만 수정할 수 있습니다.');
     }
 
-    const updated = await prisma.answer.update({
-      where: { id: normalizedAnswerId },
-      data: {
-        ...(data.content !== undefined && { content: data.content }),
-        ...(data.imageUrl !== undefined && { imageUrl: data.imageUrl }),
-        ...(data.moodId !== undefined && { moodId: data.moodId }),
-      },
-      include: { user: true },
-    });
+    // 답변 수정 + 하트 차감 + colorId 업데이트를 원자적으로 처리
+    const updateOps: any[] = [
+      prisma.answer.update({
+        where: { id: normalizedAnswerId },
+        data: {
+          ...(data.content !== undefined && { content: data.content }),
+          ...(data.imageUrl !== undefined && { imageUrl: data.imageUrl }),
+          ...(data.moodId !== undefined && { moodId: data.moodId }),
+        },
+        include: { user: true },
+      }),
+    ];
 
-    // 수정 시 선택한 캐릭터 색상(moodId)을 FamilyMembership에도 반영
-    if (data.moodId && user.familyId) {
-      await prisma.familyMembership.updateMany({
-        where: { userId: user.id, familyId: user.familyId },
-        data: { colorId: data.moodId },
-      });
+    // 하트 1개 차감 (가족 소속인 경우)
+    if (user.familyId) {
+      updateOps.push(
+        prisma.familyMembership.updateMany({
+          where: { userId: user.id, familyId: user.familyId },
+          data: {
+            hearts: { decrement: 1 },
+            ...(data.moodId && { colorId: data.moodId }),
+          },
+        })
+      );
     }
+
+    const [updated] = await prisma.$transaction(updateOps);
 
     return this.toAnswerResponse(updated);
   }
