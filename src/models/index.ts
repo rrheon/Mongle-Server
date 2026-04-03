@@ -97,6 +97,7 @@ export interface DailyQuestionResponse {
   hasMyAnswer: boolean;
   hasMySkipped: boolean;
   familyAnswerCount: number;
+  memberAnswerStatuses: MemberAnswerStatus[];
 }
 
 export interface SkipQuestionResponse {
@@ -154,10 +155,18 @@ export interface AnswerResponse {
   updatedAt: Date;
 }
 
+export interface MemberAnswerStatus {
+  userId: string;
+  userName: string;
+  colorId: string;
+  status: 'answered' | 'skipped' | 'not_answered';
+}
+
 export interface FamilyAnswersResponse {
   answers: AnswerResponse[];
   totalCount: number;
   myAnswer: AnswerResponse | null;
+  memberStatuses: MemberAnswerStatus[];
 }
 
 // ============================================

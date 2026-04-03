@@ -12,26 +12,98 @@ import { Errors } from '../middleware/errorHandler';
 
 export class QuestionService {
   /**
+   * Accept-Language 헤더에서 지원 언어 추출
+   */
+  resolveLanguage(acceptLanguage?: string): 'ko' | 'en' | 'ja' {
+    if (!acceptLanguage) return 'ko';
+    const lang = acceptLanguage.split(',')[0].trim().toLowerCase().slice(0, 2);
+    if (lang === 'ja') return 'ja';
+    if (lang === 'en') return 'en';
+    return 'ko';
+  }
+
+  /**
+   * 언어에 맞는 content 반환
+   */
+  private localizedContent(
+    question: { content: string; contentEn?: string | null; contentJa?: string | null },
+    lang: 'ko' | 'en' | 'ja'
+  ): string {
+    if (lang === 'en' && question.contentEn) return question.contentEn;
+    if (lang === 'ja' && question.contentJa) return question.contentJa;
+    return question.content;
+  }
+
+  /**
    * 오늘의 질문 조회 (가족별)
    * - 오늘 질문이 없으면 랜덤 배정
    */
-  async getTodayQuestion(userId: string): Promise<DailyQuestionResponse> {
+  async getTodayQuestion(userId: string, lang: 'ko' | 'en' | 'ja' = 'ko'): Promise<DailyQuestionResponse> {
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) throw Errors.notFound('사용자');
     if (!user.familyId) throw Errors.badRequest('가족에 속해 있지 않습니다.');
 
     const today = this.getToday();
+    const familyId = user.familyId;
 
     let dailyQuestion = await prisma.dailyQuestion.findUnique({
-      where: { familyId_date: { familyId: user.familyId, date: today } },
+      where: { familyId_date: { familyId, date: today } },
       include: { question: true },
     });
 
     if (!dailyQuestion) {
-      dailyQuestion = await this.assignQuestionToFamily(user.familyId, today);
+      // 가장 최근 미완료 질문을 탐색 (어제 → 그 이전)
+      // 48시간(2일) 이상 지난 질문은 미완료여도 자동 넘김
+      const twoDaysAgo = new Date(today);
+      twoDaysAgo.setUTCDate(twoDaysAgo.getUTCDate() - 2);
+
+      const recentDQ = await prisma.dailyQuestion.findFirst({
+        where: { familyId, date: { gte: twoDaysAgo, lt: today } },
+        include: { question: true },
+        orderBy: { date: 'desc' },
+      });
+
+      if (recentDQ) {
+        const allCompleted = await this.isQuestionCompleted(familyId, recentDQ.questionId, recentDQ.date);
+        if (!allCompleted) {
+          // 미완료 질문이 48시간 이내: 해당 질문을 그대로 반환
+          return this.toDailyQuestionResponse(recentDQ, user.id, familyId, lang);
+        }
+      }
+      // 미완료 질문 없거나 48시간 초과 → 새 질문 배정
+      dailyQuestion = await this.assignQuestionToFamily(familyId, today);
     }
 
-    return this.toDailyQuestionResponse(dailyQuestion, user.id, user.familyId);
+    return this.toDailyQuestionResponse(dailyQuestion, user.id, familyId, lang);
+  }
+
+  /**
+   * 특정 질문에 대해 해당 가족의 모든 멤버가 답변 또는 패스했는지 확인
+   */
+  private async isQuestionCompleted(familyId: string, questionId: string, date: Date): Promise<boolean> {
+    const memberships = await prisma.familyMembership.findMany({
+      where: { familyId },
+      select: { userId: true, skippedDate: true },
+    });
+
+    const kstDayStart = new Date(date.getTime() - 9 * 60 * 60 * 1000);
+    const kstDayEnd = new Date(date.getTime() + 15 * 60 * 60 * 1000);
+    const answeredUserIds = new Set(
+      (await prisma.answer.findMany({
+        where: {
+          questionId,
+          userId: { in: memberships.map((m) => m.userId) },
+          createdAt: { gte: kstDayStart, lt: kstDayEnd },
+        },
+        select: { userId: true },
+      })).map((a) => a.userId)
+    );
+
+    return memberships.every(
+      (m) =>
+        answeredUserIds.has(m.userId) ||
+        (m.skippedDate !== null && m.skippedDate.getTime() === date.getTime())
+    );
   }
 
   /**
@@ -47,20 +119,46 @@ export class QuestionService {
     if (!user.familyId) throw Errors.badRequest('가족에 속해 있지 않습니다.');
 
     const today = this.getToday();
+    const familyId = user.familyId;
+
+    // 실제 활성 질문 조회 (getTodayQuestion과 동일 로직)
+    let dailyQuestion = await prisma.dailyQuestion.findUnique({
+      where: { familyId_date: { familyId, date: today } },
+      include: { question: true },
+    });
+
+    if (!dailyQuestion) {
+      const twoDaysAgo = new Date(today);
+      twoDaysAgo.setUTCDate(twoDaysAgo.getUTCDate() - 2);
+      const recentDQ = await prisma.dailyQuestion.findFirst({
+        where: { familyId, date: { gte: twoDaysAgo, lt: today } },
+        include: { question: true },
+        orderBy: { date: 'desc' },
+      });
+      if (recentDQ) {
+        const allCompleted = await this.isQuestionCompleted(familyId, recentDQ.questionId, recentDQ.date);
+        if (!allCompleted) dailyQuestion = recentDQ;
+      }
+    }
+
+    if (!dailyQuestion) throw Errors.notFound('오늘의 질문');
+
+    // skippedDate는 실제 질문 날짜 사용 (전날 미완료 질문일 수 있음)
+    const questionDate = dailyQuestion.date;
 
     // 하트 잔액 및 이미 패스했는지 확인
     const membership = await prisma.familyMembership.findUnique({
-      where: { userId_familyId: { userId: user.id, familyId: user.familyId } },
+      where: { userId_familyId: { userId: user.id, familyId } },
     });
 
     if (!membership) throw Errors.notFound('멤버십');
 
-    // 이미 오늘 패스했는지 확인
+    // 이미 해당 질문을 패스했는지 확인
     const alreadySkipped =
       membership.skippedDate !== null &&
-      membership.skippedDate.getTime() === today.getTime();
+      membership.skippedDate.getTime() === questionDate.getTime();
     if (alreadySkipped) {
-      throw Errors.conflict('오늘 이미 질문을 패스했습니다. 하루 1회만 패스할 수 있습니다.');
+      throw Errors.conflict('이미 질문을 패스했습니다.');
     }
 
     const currentHearts = membership.hearts ?? 0;
@@ -69,23 +167,18 @@ export class QuestionService {
     }
 
     // 이미 답변한 경우 패스 불가
-    const dailyQuestion = await prisma.dailyQuestion.findUnique({
-      where: { familyId_date: { familyId: user.familyId, date: today } },
+    const myAnswer = await prisma.answer.findFirst({
+      where: { questionId: dailyQuestion.question.id, userId: user.id },
     });
-    if (dailyQuestion) {
-      const myAnswer = await prisma.answer.findFirst({
-        where: { questionId: dailyQuestion.questionId, userId: user.id },
-      });
-      if (myAnswer) {
-        throw Errors.conflict('이미 답변한 질문은 패스할 수 없습니다.');
-      }
+    if (myAnswer) {
+      throw Errors.conflict('이미 답변한 질문은 패스할 수 없습니다.');
     }
 
-    // skippedDate = 오늘, 하트 -3 (원자적 처리)
+    // skippedDate = 질문 날짜, 하트 -3 (원자적 처리)
     const [updatedMembership] = await prisma.$transaction([
       prisma.familyMembership.update({
-        where: { userId_familyId: { userId: user.id, familyId: user.familyId } },
-        data: { skippedDate: today, hearts: { decrement: 3 } },
+        where: { userId_familyId: { userId: user.id, familyId } },
+        data: { skippedDate: questionDate, hearts: { decrement: 3 } },
       }),
     ]);
 
@@ -98,7 +191,7 @@ export class QuestionService {
   /**
    * 특정 날짜의 질문 조회 (가족별)
    */
-  async getQuestionByDate(userId: string, dateStr: string): Promise<DailyQuestionResponse | null> {
+  async getQuestionByDate(userId: string, dateStr: string, lang: 'ko' | 'en' | 'ja' = 'ko'): Promise<DailyQuestionResponse | null> {
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) throw Errors.notFound('사용자');
     if (!user.familyId) return null;
@@ -113,16 +206,16 @@ export class QuestionService {
 
     if (!dailyQuestion) return null;
 
-    return this.toDailyQuestionResponse(dailyQuestion, user.id, user.familyId);
+    return this.toDailyQuestionResponse(dailyQuestion, user.id, user.familyId, lang);
   }
 
   /**
    * 질문 상세 조회
    */
-  async getQuestion(questionId: string): Promise<QuestionResponse> {
+  async getQuestion(questionId: string, lang: 'ko' | 'en' | 'ja' = 'ko'): Promise<QuestionResponse> {
     const question = await prisma.question.findUnique({ where: { id: questionId } });
     if (!question) throw Errors.notFound('질문');
-    return this.toQuestionResponse(question);
+    return this.toQuestionResponse(question, lang);
   }
 
   /**
@@ -131,7 +224,8 @@ export class QuestionService {
   async getQuestionHistory(
     userId: string,
     page: number,
-    limit: number
+    limit: number,
+    lang: 'ko' | 'en' | 'ja' = 'ko'
   ): Promise<PaginatedResponse<DailyQuestionHistoryResponse>> {
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) throw Errors.notFound('사용자');
@@ -200,9 +294,30 @@ export class QuestionService {
         myMembership?.skippedDate != null &&
         myMembership.skippedDate.getTime() === dq.date.getTime();
 
+      const answeredUserIds = new Set(answers.map((a) => a.userId));
+      const memberAnswerStatuses = familyMemberships.map((m) => {
+        if (answeredUserIds.has(m.userId)) {
+          return {
+            userId: m.userId,
+            userName: m.nickname ?? m.user.name,
+            colorId: m.colorId ?? m.user.moodId ?? 'loved',
+            status: 'answered' as const,
+          };
+        }
+        const skipped =
+          m.skippedDate !== null &&
+          m.skippedDate.getTime() === dq.date.getTime();
+        return {
+          userId: m.userId,
+          userName: m.nickname ?? m.user.name,
+          colorId: m.colorId ?? m.user.moodId ?? 'loved',
+          status: skipped ? ('skipped' as const) : ('not_answered' as const),
+        };
+      });
+
       return {
         id: dq.id,
-        question: this.toQuestionResponse(dq.question),
+        question: this.toQuestionResponse(dq.question, lang),
         date: dq.date.toISOString().split('T')[0],
         familyId: dq.familyId,
         isSkipped: dq.isSkipped,
@@ -211,6 +326,7 @@ export class QuestionService {
         hasMySkipped,
         familyAnswerCount: answers.length,
         answers: answerSummaries,
+        memberAnswerStatuses,
       };
     });
 
@@ -226,7 +342,7 @@ export class QuestionService {
    * - 이미 오늘 나만의 질문이 등록된 경우 거부
    * - 하트 3개 이상 보유 필요
    */
-  async createCustomQuestion(userId: string, content: string): Promise<CreateCustomQuestionResponse> {
+  async createCustomQuestion(userId: string, content: string, lang: 'ko' | 'en' | 'ja' = 'ko'): Promise<CreateCustomQuestionResponse> {
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) throw Errors.notFound('사용자');
     if (!user.familyId) throw Errors.badRequest('가족에 속해 있지 않습니다.');
@@ -304,7 +420,7 @@ export class QuestionService {
       return { updatedDaily: daily };
     });
 
-    const questionResponse = await this.toDailyQuestionResponse(updatedDaily, user.id, familyId);
+    const questionResponse = await this.toDailyQuestionResponse(updatedDaily, user.id, familyId, lang);
 
     const updatedMembership = await prisma.familyMembership.findUnique({
       where: { userId_familyId: { userId: user.id, familyId } },
@@ -363,19 +479,23 @@ export class QuestionService {
       familyId: string;
       isSkipped: boolean;
       skippedAt: Date | null;
-      question: { id: string; content: string; category: string; createdAt: Date; isCustom: boolean };
+      question: { id: string; content: string; contentEn?: string | null; contentJa?: string | null; category: string; createdAt: Date; isCustom: boolean };
     },
     userId: string,
-    familyId: string
+    familyId: string,
+    lang: 'ko' | 'en' | 'ja' = 'ko'
   ): Promise<DailyQuestionResponse> {
-    const [familyMembers, membership] = await Promise.all([
-      prisma.user.findMany({ where: { familyId }, select: { id: true } }),
+    const [memberships, myMembership] = await Promise.all([
+      prisma.familyMembership.findMany({
+        where: { familyId },
+        select: { userId: true, nickname: true, colorId: true, skippedDate: true, user: { select: { id: true, name: true, moodId: true } } },
+      }),
       prisma.familyMembership.findUnique({
         where: { userId_familyId: { userId, familyId } },
         select: { skippedDate: true },
       }),
     ]);
-    const memberIds = familyMembers.map((m) => m.id);
+    const memberIds = memberships.map((m) => m.userId);
 
     // getHistory와 동일한 KST 날짜 범위 필터 적용 (다른 날짜의 같은 질문 답변 누출 방지)
     const kstDayStart = new Date(dailyQuestion.date.getTime() - 9 * 60 * 60 * 1000);
@@ -389,35 +509,61 @@ export class QuestionService {
       select: { userId: true },
     });
 
+    const answeredUserIds = new Set(answers.map((a) => a.userId));
+
     // 오늘 패스 여부: membership.skippedDate가 이 dailyQuestion의 날짜와 같으면 true
     const hasMySkipped =
-      membership?.skippedDate !== null &&
-      membership?.skippedDate !== undefined &&
-      membership.skippedDate.getTime() === dailyQuestion.date.getTime();
+      myMembership?.skippedDate !== null &&
+      myMembership?.skippedDate !== undefined &&
+      myMembership.skippedDate.getTime() === dailyQuestion.date.getTime();
+
+    // 각 멤버의 답변/스킵/미답변 상태
+    const memberAnswerStatuses = memberships.map((m) => {
+      if (answeredUserIds.has(m.userId)) {
+        return {
+          userId: m.userId,
+          userName: m.nickname ?? m.user.name,
+          colorId: m.colorId ?? m.user.moodId ?? 'loved',
+          status: 'answered' as const,
+        };
+      }
+      const skipped =
+        m.skippedDate !== null &&
+        m.skippedDate.getTime() === dailyQuestion.date.getTime();
+      return {
+        userId: m.userId,
+        userName: m.nickname ?? m.user.name,
+        colorId: m.colorId ?? m.user.moodId ?? 'loved',
+        status: skipped ? ('skipped' as const) : ('not_answered' as const),
+      };
+    });
 
     return {
       id: dailyQuestion.id,
-      question: this.toQuestionResponse(dailyQuestion.question),
+      question: this.toQuestionResponse(dailyQuestion.question, lang),
       date: dailyQuestion.date.toISOString().split('T')[0],
       familyId: dailyQuestion.familyId,
       isSkipped: dailyQuestion.isSkipped,
       skippedAt: dailyQuestion.skippedAt?.toISOString() ?? null,
-      hasMyAnswer: answers.some((a) => a.userId === userId),
+      hasMyAnswer: answeredUserIds.has(userId),
       hasMySkipped,
       familyAnswerCount: answers.length,
+      memberAnswerStatuses,
     };
   }
 
   private toQuestionResponse(question: {
     id: string;
     content: string;
+    contentEn?: string | null;
+    contentJa?: string | null;
     category: string;
     createdAt: Date;
     isCustom?: boolean;
-  }): QuestionResponse {
+  }, lang: 'ko' | 'en' | 'ja' = 'ko'): QuestionResponse {
     return {
       id: question.id,
-      content: question.content,
+      content: this.localizedContent(question, lang),
       category: question.category as QuestionResponse['category'],
       createdAt: question.createdAt,
       isCustom: question.isCustom ?? false,

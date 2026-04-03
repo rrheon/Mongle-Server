@@ -7,6 +7,11 @@ import {
   UserResponse,
 } from '../models';
 import { Errors } from '../middleware/errorHandler';
+import { NotificationService } from './NotificationService';
+import { PushNotificationService } from './PushNotificationService';
+
+const notificationService = new NotificationService();
+const pushService = new PushNotificationService();
 
 export class AnswerService {
 
@@ -67,6 +72,21 @@ export class AnswerService {
           ...(data.moodId && { colorId: data.moodId }),
         },
       });
+
+      // 가족 멤버(본인 제외)에게 답변 알림 발송
+      const otherMembers = await prisma.user.findMany({
+        where: { familyId: user.familyId, id: { not: user.id } },
+        select: { id: true, apnsToken: true, fcmToken: true },
+      });
+
+      const title = `${user.name}님이 답변했어요!`;
+      const body = '오늘의 질문에 새 답변이 올라왔어요. 확인해보세요 🌿';
+
+      for (const member of otherMembers) {
+        notificationService.createNotification(member.id, 'MEMBER_ANSWERED', title, body, user.familyId).catch(() => {});
+        if (member.apnsToken) pushService.sendApnsPush(member.apnsToken, title, body, 'MEMBER_ANSWERED').catch(() => {});
+        if (member.fcmToken) pushService.sendFcmPush(member.fcmToken, title, body, 'MEMBER_ANSWERED').catch(() => {});
+      }
     }
 
     return this.toAnswerResponse(answer);
@@ -118,13 +138,14 @@ export class AnswerService {
         answers: [],
         totalCount: 0,
         myAnswer: null,
+        memberStatuses: [],
       };
     }
 
-    // 가족 멤버 닉네임 및 캐릭터 색상 맵 구성
+    // 가족 멤버 닉네임, 색상, skippedDate 조회
     const memberships = await prisma.familyMembership.findMany({
       where: { familyId: user.familyId },
-      select: { userId: true, nickname: true, colorId: true, user: { select: { name: true, moodId: true } } },
+      select: { userId: true, nickname: true, colorId: true, skippedDate: true, user: { select: { name: true, moodId: true } } },
     });
     const nicknameMap = new Map(
       memberships.map((m) => [m.userId, m.nickname ?? m.user.name])
@@ -132,6 +153,15 @@ export class AnswerService {
     const colorMap = new Map(
       memberships.map((m) => [m.userId, m.colorId ?? m.user.moodId ?? 'loved'])
     );
+
+    // 해당 질문의 DailyQuestion 조회 (skip 날짜 비교용)
+    const dailyQuestion = await prisma.dailyQuestion.findFirst({
+      where: {
+        question: { id: questionId.toLowerCase() },
+        familyId: user.familyId,
+      },
+      orderBy: { date: 'desc' },
+    });
 
     // 가족 구성원들의 답변 조회
     const answers = await prisma.answer.findMany({
@@ -146,11 +176,35 @@ export class AnswerService {
     });
 
     const myAnswer = answers.find((a) => a.userId === user.id);
+    const answeredUserIds = new Set(answers.map((a) => a.userId));
+
+    // 각 멤버의 답변/스킵/미답변 상태 구성
+    const memberStatuses = memberships.map((m) => {
+      if (answeredUserIds.has(m.userId)) {
+        return {
+          userId: m.userId,
+          userName: m.nickname ?? m.user.name,
+          colorId: m.colorId ?? m.user.moodId ?? 'loved',
+          status: 'answered' as const,
+        };
+      }
+      const skipped =
+        dailyQuestion &&
+        m.skippedDate !== null &&
+        m.skippedDate.getTime() === dailyQuestion.date.getTime();
+      return {
+        userId: m.userId,
+        userName: m.nickname ?? m.user.name,
+        colorId: m.colorId ?? m.user.moodId ?? 'loved',
+        status: skipped ? ('skipped' as const) : ('not_answered' as const),
+      };
+    });
 
     return {
       answers: answers.map((a) => this.toAnswerResponse(a, nicknameMap, colorMap)),
       totalCount: answers.length,
       myAnswer: myAnswer ? this.toAnswerResponse(myAnswer, nicknameMap, colorMap) : null,
+      memberStatuses,
     };
   }
 
