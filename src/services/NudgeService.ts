@@ -62,9 +62,18 @@ export class NudgeService {
       sender.familyId ?? undefined
     );
 
-    // APNs 실시간 푸시 발송 (토큰이 있는 경우만, 실패해도 전체 요청 영향 없음)
+    // APNs 실시간 푸시 발송 (iOS)
     if (target.apnsToken) {
       pushService.sendNudgePush(target.apnsToken, sender.name).catch(() => {});
+    }
+    // FCM 실시간 푸시 발송 (Android)
+    if (target.fcmToken) {
+      pushService.sendFcmPush(
+        target.fcmToken,
+        '재촉하기 알림',
+        `${sender.name}님이 오늘의 질문에 답변해달라고 합니다 🌿`,
+        'ANSWER_REQUEST'
+      ).catch(() => {});
     }
 
     return {

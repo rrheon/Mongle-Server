@@ -1,7 +1,12 @@
 service: famtree-api
 
 frameworkVersion: '3'
-
+useDotenv: true
+package:
+  individually: true
+  include:
+    - dist/swagger.json  # 👈 이 줄을 정확히 추가해 주세요!
+    - src/swagger.json   # (혹시 모르니 src 폴더용도 같이 넣어두면 안전합니다)
 provider:
   name: aws
   runtime: nodejs20.x
@@ -18,6 +23,9 @@ provider:
     COGNITO_USER_POOL_ID: ${env:COGNITO_USER_POOL_ID, ''}
     COGNITO_CLIENT_ID: ${env:COGNITO_CLIENT_ID, ''}
     COGNITO_REGION: ${self:provider.region}
+    FIREBASE_PROJECT_ID: ${env:FIREBASE_PROJECT_ID, ''}
+    FIREBASE_CLIENT_EMAIL: ${env:FIREBASE_CLIENT_EMAIL, ''}
+    FIREBASE_PRIVATE_KEY: ${env:FIREBASE_PRIVATE_KEY, ''}
 
   # IAM 권한 (최소 권한 원칙)
   iam:
@@ -30,6 +38,22 @@ provider:
             - cognito-idp:ListUsers
           Resource:
             - arn:aws:cognito-idp:${self:provider.region}:*:userpool/*
+        - Effect: Allow
+          Action:
+            - ec2:CreateNetworkInterface
+            - ec2:DescribeNetworkInterfaces
+            - ec2:DeleteNetworkInterface
+          Resource: '*'
+
+  # VPC 설정 (RDS 접근을 위해 RDS와 동일 VPC 배치)
+#  vpc:
+#    securityGroupIds:
+#      - sg-0b7e5bb2b2e60c200
+#    subnetIds:
+#      - subnet-0118b6d526e51fea1
+#      - subnet-004ea2f0bd586e7c9
+#      - subnet-0fb66c2fd273d0320
+#      - subnet-0e28e7103a7f0f426
 
   # API Gateway CORS 설정
   httpApi:
@@ -39,6 +63,7 @@ provider:
       allowedHeaders:
         - Content-Type
         - Authorization
+        - Accept-Language
       allowedMethods:
         - GET
         - POST

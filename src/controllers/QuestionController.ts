@@ -28,6 +28,10 @@ import { QuestionService } from '../services/QuestionService';
 export class QuestionController extends Controller {
   private questionService = new QuestionService();
 
+  private getLang(req: AuthRequest) {
+    return this.questionService.resolveLanguage(req.headers['accept-language']);
+  }
+
   /**
    * 오늘의 질문 조회 (가족별)
    * @summary 오늘의 질문
@@ -36,7 +40,7 @@ export class QuestionController extends Controller {
   @Security('jwt')
   @SuccessResponse(200, '성공')
   public async getTodayQuestion(@Request() req: AuthRequest): Promise<DailyQuestionResponse> {
-    return this.questionService.getTodayQuestion(req.user.userId);
+    return this.questionService.getTodayQuestion(req.user.userId, this.getLang(req));
   }
 
   /**
@@ -62,7 +66,7 @@ export class QuestionController extends Controller {
     @Request() req: AuthRequest,
     @Path() date: string
   ): Promise<DailyQuestionResponse | null> {
-    return this.questionService.getQuestionByDate(req.user.userId, date);
+    return this.questionService.getQuestionByDate(req.user.userId, date, this.getLang(req));
   }
 
   /**
@@ -72,8 +76,11 @@ export class QuestionController extends Controller {
   @Get('{questionId}')
   @Security('jwt')
   @SuccessResponse(200, '성공')
-  public async getQuestion(@Path() questionId: string): Promise<QuestionResponse> {
-    return this.questionService.getQuestion(questionId);
+  public async getQuestion(
+    @Request() req: AuthRequest,
+    @Path() questionId: string
+  ): Promise<QuestionResponse> {
+    return this.questionService.getQuestion(questionId, this.getLang(req));
   }
 
   /**
@@ -88,7 +95,7 @@ export class QuestionController extends Controller {
     @Query() page?: number,
     @Query() limit?: number
   ): Promise<PaginatedResponse<DailyQuestionHistoryResponse>> {
-    return this.questionService.getQuestionHistory(req.user.userId, page ?? 1, limit ?? 20);
+    return this.questionService.getQuestionHistory(req.user.userId, page ?? 1, limit ?? 20, this.getLang(req));
   }
 
   /**
@@ -102,6 +109,6 @@ export class QuestionController extends Controller {
     @Request() req: AuthRequest,
     @Body() body: CreateCustomQuestionRequest
   ): Promise<CreateCustomQuestionResponse> {
-    return this.questionService.createCustomQuestion(req.user.userId, body.content);
+    return this.questionService.createCustomQuestion(req.user.userId, body.content, this.getLang(req));
   }
 }

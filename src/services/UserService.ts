@@ -208,6 +208,15 @@ export class UserService {
   }
 
   /**
+   * FCM 디바이스 토큰 저장/갱신 (Android)
+   */
+  async registerFcmToken(userId: string, token: string): Promise<void> {
+    const user = await prisma.user.findUnique({ where: { userId } });
+    if (!user) throw Errors.notFound('사용자');
+    await prisma.user.update({ where: { id: user.id }, data: { fcmToken: token } });
+  }
+
+  /**
    * DB ID로 사용자 조회
    */
   async getUserById(id: string): Promise<UserResponse> {

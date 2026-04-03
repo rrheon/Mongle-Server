@@ -3,6 +3,7 @@ import jwksClient from 'jwks-rsa';
 import bcrypt from 'bcryptjs';
 import prisma from '../utils/prisma';
 import { signToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
+import { Errors } from '../middleware/errorHandler';
 
 async function verifyAppleIdentityToken(identityToken: string): Promise<{ sub: string; email?: string }> {
   const client = jwksClient({ jwksUri: 'https://appleid.apple.com/auth/keys' });
@@ -17,7 +18,7 @@ async function fetchKakaoUserInfo(accessToken: string): Promise<{ id: string; em
   const response = await fetch('https://kapi.kakao.com/v2/user/me', {
     headers: { Authorization: `Bearer ${accessToken}` }
   });
-  if (!response.ok) throw new Error('Failed to fetch Kakao user info');
+  if (!response.ok) throw new Error(`Failed to fetch Kakao user info: ${response.status}`);
   const data = await response.json() as {
     id: number;
     kakao_account?: { email?: string; profile?: { nickname?: string } };
@@ -27,6 +28,15 @@ async function fetchKakaoUserInfo(accessToken: string): Promise<{ id: string; em
     email: data.kakao_account?.email,
     name: data.kakao_account?.profile?.nickname
   };
+}
+
+async function verifyKakaoIdToken(idToken: string): Promise<{ sub: string; email?: string }> {
+  const client = jwksClient({ jwksUri: 'https://kauth.kakao.com/.well-known/jwks.json' });
+  const decoded = jwt.decode(idToken, { complete: true }) as jwt.Jwt | null;
+  if (!decoded?.header?.kid) throw new Error('Invalid Kakao identity token');
+  const key = await client.getSigningKey(decoded.header.kid as string);
+  const payload = jwt.verify(idToken, key.getPublicKey(), { algorithms: ['RS256'] }) as jwt.JwtPayload;
+  return { sub: payload.sub as string, email: payload.email as string | undefined };
 }
 
 async function verifyGoogleIdToken(idToken: string): Promise<{ sub: string; email?: string; name?: string }> {
@@ -75,11 +85,21 @@ export class AuthService {
         break;
       }
       case 'kakao': {
-        if (!fields.access_token) throw new Error('access_token required for Kakao login');
-        const result = await fetchKakaoUserInfo(fields.access_token);
-        externalId = result.id;
-        email = result.email || fields.email;
-        name = result.name || fields.name;
+        if (fields.id_token) {
+          // id_token(OIDC JWT) 검증 — REST API 호출 없이 서버 검증 가능
+          const result = await verifyKakaoIdToken(fields.id_token);
+          externalId = result.sub;
+          email = result.email || fields.email;
+          name = fields.name;
+        } else if (fields.access_token) {
+          // fallback: access_token으로 카카오 API 직접 호출
+          const result = await fetchKakaoUserInfo(fields.access_token);
+          externalId = result.id;
+          email = result.email || fields.email;
+          name = result.name || fields.name;
+        } else {
+          throw new Error('id_token or access_token required for Kakao login');
+        }
         break;
       }
       case 'google': {
@@ -130,8 +150,8 @@ export class AuthService {
 
   async emailSignup(name: string, email: string, password: string): Promise<SocialLoginResult> {
     const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) throw new Error('이미 사용 중인 이메일입니다.');
-    if (password.length < 6) throw new Error('비밀번호는 최소 6자 이상이어야 합니다.');
+    if (existing) throw Errors.conflict('이미 사용 중인 이메일입니다.');
+    if (password.length < 6) throw Errors.badRequest('비밀번호는 최소 6자 이상이어야 합니다.');
 
     const passwordHash = await bcrypt.hash(password, 10);
     const userId = `email:${email}`;
@@ -160,10 +180,10 @@ export class AuthService {
 
   async emailLogin(email: string, password: string): Promise<SocialLoginResult> {
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !user.passwordHash) throw new Error('이메일 또는 비밀번호가 올바르지 않습니다.');
+    if (!user || !user.passwordHash) throw Errors.unauthorized('이메일 또는 비밀번호가 올바르지 않습니다.');
 
     const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) throw new Error('이메일 또는 비밀번호가 올바르지 않습니다.');
+    if (!valid) throw Errors.unauthorized('이메일 또는 비밀번호가 올바르지 않습니다.');
 
     const jwtPayload = { sub: user.userId, email: user.email };
     const token = signToken(jwtPayload);
@@ -188,12 +208,12 @@ export class AuthService {
     try {
       payload = verifyRefreshToken(refreshToken);
     } catch {
-      throw new Error('유효하지 않거나 만료된 리프레시 토큰입니다.');
+      throw Errors.unauthorized('유효하지 않거나 만료된 리프레시 토큰입니다.');
     }
 
     // 사용자가 여전히 존재하는지 확인
     const user = await prisma.user.findUnique({ where: { userId: payload.sub } });
-    if (!user) throw new Error('사용자를 찾을 수 없습니다.');
+    if (!user) throw Errors.notFound('사용자');
 
     const jwtPayload = { sub: user.userId, email: user.email };
     const token = signToken(jwtPayload);

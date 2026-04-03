@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
@@ -22,6 +23,7 @@ model User {
   updatedAt          DateTime           @updatedAt @map("updated_at")
   moodId             String?            @default("loved") @map("mood_id")
   apnsToken          String?            @map("apns_token")
+  fcmToken           String?            @map("fcm_token")
   answers            Answer[]
   memberships        FamilyMembership[]
   moodRecords        MoodRecord[]
@@ -67,6 +69,8 @@ model FamilyMembership {
 model Question {
   id             String           @id @default(uuid())
   content        String
+  contentEn      String?          @map("content_en")
+  contentJa      String?          @map("content_ja")
   category       QuestionCategory
   isActive       Boolean          @default(true) @map("is_active")
   isCustom       Boolean          @default(false) @map("is_custom")

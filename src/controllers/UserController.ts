@@ -74,6 +74,21 @@ export class UserController extends Controller {
   }
 
   /**
+   * FCM 디바이스 토큰 등록/갱신 (Android)
+   * @summary FCM 푸시 토큰 등록
+   */
+  @Patch('me/fcm-token')
+  @Security('jwt')
+  @SuccessResponse(200, '성공')
+  public async registerFcmToken(
+    @Request() req: AuthRequest,
+    @Body() body: { token: string }
+  ): Promise<{ ok: boolean }> {
+    await this.userService.registerFcmToken(req.user.userId, body.token);
+    return { ok: true };
+  }
+
+  /**
    * 광고 시청 보상 하트 지급
    * @summary 광고 보상 하트 지급
    */

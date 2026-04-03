@@ -1,6 +1,6 @@
 import serverlessExpress from '@codegenie/serverless-express';
 import { createApp } from './app';
-import { APIGatewayProxyEvent, Context, Callback, APIGatewayProxyResult } from 'aws-lambda';
+import { APIGatewayProxyEventV2, Context } from 'aws-lambda';
 
 // Express 앱 생성
 const app = createApp();
@@ -9,13 +9,12 @@ const app = createApp();
 const serverlessHandler = serverlessExpress({ app });
 
 // Lambda 핸들러
-export const handler = (
-  event: APIGatewayProxyEvent,
-  context: Context,
-  callback: Callback<APIGatewayProxyResult>
-): void => {
+export const handler = async (
+  event: APIGatewayProxyEventV2,
+  context: Context
+): Promise<unknown> => {
   // Lambda 컨텍스트 설정
   context.callbackWaitsForEmptyEventLoop = false;
 
-  serverlessHandler(event, context, callback);
+  return serverlessHandler(event, context, () => {});
 };
