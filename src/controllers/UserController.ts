@@ -104,6 +104,19 @@ export class UserController extends Controller {
   }
 
   /**
+   * 그룹별 일일 접속 하트 지급 (자정 기준 리셋)
+   * @summary 일일 접속 하트
+   */
+  @Post('me/hearts/daily')
+  @Security('jwt')
+  @SuccessResponse(200, '성공')
+  public async claimDailyHeart(
+    @Request() req: AuthRequest
+  ): Promise<{ heartsGranted: number; heartsRemaining: number; alreadyClaimed: boolean }> {
+    return this.userService.claimDailyHeart(req.user.userId);
+  }
+
+  /**
    * 사용자 ID로 조회
    * @summary 사용자 조회
    */
