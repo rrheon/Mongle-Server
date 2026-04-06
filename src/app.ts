@@ -16,7 +16,29 @@ export function createApp(): Express {
   app.use(helmet({
     contentSecurityPolicy: isProduction, // production: 활성화 / dev: Swagger UI를 위해 비활성화
   }));
-  app.use(cors());
+
+  // CORS — 프로덕션은 화이트리스트, 개발은 모두 허용
+  // 모바일 앱(Origin 헤더 없음)은 항상 허용
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        // 모바일 앱(WKWebView/OkHttp)은 Origin 헤더가 없음 — 항상 허용
+        if (!origin) return callback(null, true);
+        // 개발 환경은 모두 허용
+        if (!isProduction) return callback(null, true);
+        // 프로덕션은 화이트리스트만
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+        return callback(new Error(`CORS: origin not allowed: ${origin}`));
+      },
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'Accept-Language'],
+    })
+  );
   app.use(json());
   app.use(urlencoded({ extended: true }));
 
