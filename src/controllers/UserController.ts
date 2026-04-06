@@ -104,13 +104,13 @@ export class UserController extends Controller {
   }
 
   /**
-   * 사용자 ID로 조회
+   * 사용자 ID로 조회 (본인 또는 같은 가족 구성원만 가능)
    * @summary 사용자 조회
    */
   @Get('{userId}')
   @Security('jwt')
   @SuccessResponse(200, '성공')
-  public async getUser(@Path() userId: string): Promise<UserResponse> {
-    return this.userService.getUserById(userId);
+  public async getUser(@Request() req: AuthRequest, @Path() userId: string): Promise<UserResponse> {
+    return this.userService.getUserById(req.user.userId, userId);
   }
 }
