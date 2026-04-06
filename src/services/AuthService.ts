@@ -4,7 +4,7 @@ import prisma from '../utils/prisma';
 import { signToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
 import { Errors } from '../middleware/errorHandler';
 
-const APPLE_BUNDLE_ID = process.env.APPLE_BUNDLE_ID || 'app.monggle.mongle';
+const APPLE_BUNDLE_ID = process.env.APPLE_BUNDLE_ID || '';
 const APPLE_ISSUER = 'https://appleid.apple.com';
 
 async function verifyAppleIdentityToken(identityToken: string): Promise<{ sub: string; email?: string }> {
@@ -12,11 +12,12 @@ async function verifyAppleIdentityToken(identityToken: string): Promise<{ sub: s
   const decoded = jwt.decode(identityToken, { complete: true }) as jwt.Jwt | null;
   if (!decoded?.header?.kid) throw new Error('Invalid Apple identity token');
   const key = await client.getSigningKey(decoded.header.kid as string);
-  const payload = jwt.verify(identityToken, key.getPublicKey(), {
+  const verifyOptions: jwt.VerifyOptions = {
     algorithms: ['RS256'],
-    audience: APPLE_BUNDLE_ID,
     issuer: APPLE_ISSUER,
-  }) as jwt.JwtPayload;
+  };
+  if (APPLE_BUNDLE_ID) verifyOptions.audience = APPLE_BUNDLE_ID;
+  const payload = jwt.verify(identityToken, key.getPublicKey(), verifyOptions) as jwt.JwtPayload;
   return { sub: payload.sub as string, email: payload.email as string | undefined };
 }
 
