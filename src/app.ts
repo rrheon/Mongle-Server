@@ -5,6 +5,7 @@ import path from 'path';
 import swaggerUi from 'swagger-ui-express';
 import { RegisterRoutes } from './routes/routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+import { socialLoginLimiter, refreshTokenLimiter } from './middleware/rateLimiter';
 import { assignDailyQuestions } from './scheduler';
 
 // Express 앱 생성
@@ -120,6 +121,10 @@ export function createApp(): Express {
       next();
     });
   }
+
+  // 인증 엔드포인트에 rate limit 적용 (tsoa 라우트 등록 전에 미들웨어 등록)
+  app.use('/auth/social', socialLoginLimiter);
+  app.use('/auth/refresh', refreshTokenLimiter);
 
   // API 라우트 등록 (tsoa가 생성)
   RegisterRoutes(app);
