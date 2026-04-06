@@ -1,6 +1,5 @@
 import jwt from 'jsonwebtoken';
 import jwksClient from 'jwks-rsa';
-import bcrypt from 'bcryptjs';
 import prisma from '../utils/prisma';
 import { signToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
 import { Errors } from '../middleware/errorHandler';
@@ -133,61 +132,6 @@ export class AuthService {
     const token = signToken(jwtPayload);
     const refresh_token = signRefreshToken(jwtPayload);
 
-    return {
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        profileImageUrl: user.profileImageUrl,
-        role: user.role,
-        familyId: user.familyId,
-        createdAt: user.createdAt,
-      },
-      token,
-      refresh_token,
-    };
-  }
-
-  async emailSignup(name: string, email: string, password: string): Promise<SocialLoginResult> {
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) throw Errors.conflict('이미 사용 중인 이메일입니다.');
-    if (password.length < 6) throw Errors.badRequest('비밀번호는 최소 6자 이상이어야 합니다.');
-
-    const passwordHash = await bcrypt.hash(password, 10);
-    const userId = `email:${email}`;
-
-    const user = await prisma.user.create({
-      data: { userId, email, name, passwordHash, role: 'OTHER' },
-    });
-
-    const jwtPayload = { sub: user.userId, email: user.email };
-    const token = signToken(jwtPayload);
-    const refresh_token = signRefreshToken(jwtPayload);
-    return {
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        profileImageUrl: user.profileImageUrl,
-        role: user.role,
-        familyId: user.familyId,
-        createdAt: user.createdAt,
-      },
-      token,
-      refresh_token,
-    };
-  }
-
-  async emailLogin(email: string, password: string): Promise<SocialLoginResult> {
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !user.passwordHash) throw Errors.unauthorized('이메일 또는 비밀번호가 올바르지 않습니다.');
-
-    const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) throw Errors.unauthorized('이메일 또는 비밀번호가 올바르지 않습니다.');
-
-    const jwtPayload = { sub: user.userId, email: user.email };
-    const token = signToken(jwtPayload);
-    const refresh_token = signRefreshToken(jwtPayload);
     return {
       user: {
         id: user.id,

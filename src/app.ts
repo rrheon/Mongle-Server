@@ -82,9 +82,9 @@ export function createApp(): Express {
     }
   }
 
-  // HTTP 요청 로깅 (개발 환경) - 민감 필드(password, token) 마스킹
+  // HTTP 요청 로깅 (개발 환경) - 민감 필드 마스킹
   if (!isProduction) {
-    const SENSITIVE_KEYS = new Set(['password', 'token', 'accessToken', 'refreshToken', 'secret']);
+    const SENSITIVE_KEYS = new Set(['token', 'accessToken', 'refreshToken', 'secret', 'identity_token', 'id_token', 'access_token']);
     app.use((req, _res, next) => {
       let logBody: Record<string, unknown> | undefined;
       if (req.body && Object.keys(req.body).length) {

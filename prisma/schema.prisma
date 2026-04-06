@@ -14,7 +14,6 @@ model User {
   email              String             @unique
   name               String
   profileImageUrl    String?            @map("profile_image_url")
-  passwordHash       String?            @map("password_hash")
   role               UserRole           @default(OTHER)
   hearts             Int                @default(0)
   lastHeartGrantedAt DateTime?          @map("last_heart_granted_at")
