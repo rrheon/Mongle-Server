@@ -37,7 +37,7 @@ export class UserService {
   /**
    * 접속 기록 저장 + 하루 첫 접속 시 활성 가족 그룹 하트 +1
    */
-  async recordAccess(userId: string): Promise<void> {
+  async recordAccess(userId: string, acceptLanguage?: string | null): Promise<void> {
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) return;
 
@@ -47,6 +47,10 @@ export class UserService {
     const alreadyGrantedToday =
       user.lastHeartGrantedAt && user.lastHeartGrantedAt >= today;
 
+    // Accept-Language → user.locale 동기화 (변경 시에만 UPDATE 발행)
+    const { resolveLocaleFromHeader } = await import('../utils/i18n/push');
+    const resolvedLocale = acceptLanguage ? resolveLocaleFromHeader(acceptLanguage) : null;
+
     const tasks: Promise<unknown>[] = [
       prisma.userAccessLog.create({ data: { userId: user.id } }),
     ];
@@ -55,7 +59,10 @@ export class UserService {
       tasks.push(
         prisma.user.update({
           where: { id: user.id },
-          data: { lastHeartGrantedAt: new Date() },
+          data: {
+            lastHeartGrantedAt: new Date(),
+            ...(resolvedLocale && user.locale !== resolvedLocale ? { locale: resolvedLocale } : {}),
+          },
         })
       );
       if (user.familyId) {
@@ -66,6 +73,14 @@ export class UserService {
           })
         );
       }
+    } else if (resolvedLocale && user.locale !== resolvedLocale) {
+      // 오늘 하트는 이미 지급됐지만 locale 이 바뀌었으면 그것만 반영
+      tasks.push(
+        prisma.user.update({
+          where: { id: user.id },
+          data: { locale: resolvedLocale },
+        })
+      );
     }
 
     await Promise.all(tasks);
@@ -188,7 +203,7 @@ export class UserService {
 
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) throw Errors.notFound('사용자');
-    if (!user.familyId) throw Errors.badRequest('활성 가족이 없습니다.');
+    if (!user.familyId) throw Errors.badRequest('활성 그룹이 없습니다.');
 
     const updated = await prisma.familyMembership.update({
       where: { userId_familyId: { userId: user.id, familyId: user.familyId } },

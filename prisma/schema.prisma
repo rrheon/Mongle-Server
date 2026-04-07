@@ -23,6 +23,8 @@ model User {
   moodId             String?            @default("loved") @map("mood_id")
   apnsToken          String?            @map("apns_token")
   fcmToken           String?            @map("fcm_token")
+  // Accept-Language 기반 사용자 선호 언어 (ko/en/ja). 서버가 푸시 알림 문구를 다국어로 선택할 때 사용.
+  locale             String?            @map("locale")
   answers            Answer[]
   memberships        FamilyMembership[]
   moodRecords        MoodRecord[]

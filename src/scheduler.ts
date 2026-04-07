@@ -2,6 +2,7 @@ import { ScheduledEvent, Context } from 'aws-lambda';
 import prisma from './utils/prisma';
 import { NotificationService } from './services/NotificationService';
 import { PushNotificationService } from './services/PushNotificationService';
+import { getPushMessages } from './utils/i18n/push';
 
 const notificationService = new NotificationService();
 const pushService = new PushNotificationService();
@@ -40,14 +41,14 @@ export async function assignDailyQuestions(): Promise<void> {
         select: { userId: true, skippedDate: true },
       });
 
-      const kstDayStart = new Date(recentDQ.date.getTime() - 9 * 60 * 60 * 1000);
-      const kstDayEnd = new Date(recentDQ.date.getTime() + 15 * 60 * 60 * 1000);
+      // 완료 판정은 이제 KST 하루 윈도우 없이 questionId 기준으로 집계.
+      // 완료 시점에 AnswerService/QuestionService 가 DQ.date 를 완료일자로 이동시키므로,
+      // recentDQ 에 매달린 답변은 recentDQ 의 lifespan 전체를 포함한다.
       const answeredUserIds = new Set(
         (await prisma.answer.findMany({
           where: {
             questionId: recentDQ.questionId,
             userId: { in: memberships.map((m) => m.userId) },
-            createdAt: { gte: kstDayStart, lt: kstDayEnd },
           },
           select: { userId: true },
         })).map((a) => a.userId)
@@ -82,18 +83,39 @@ export async function assignDailyQuestions(): Promise<void> {
     await prisma.dailyQuestion.create({ data: { questionId: selected.id, familyId: family.id, date: today } });
     assigned++;
 
-    // 가족 멤버 전원에게 새 질문 알림 발송
+    // 가족 멤버 전원에게 새 질문 알림 발송 (수신자 locale 별 로컬라이즈)
     const members = await prisma.user.findMany({
       where: { familyId: family.id },
-      select: { id: true, apnsToken: true, fcmToken: true },
+      select: { id: true, apnsToken: true, fcmToken: true, locale: true },
     });
-    const title = '오늘의 질문이 도착했어요! 🌿';
-    const body = '가족과 함께 오늘의 질문에 답변해보세요.';
+    // Lambda fire-and-forget 방지 — 모든 푸시/알림 작업을 await
+    const tasks: Promise<unknown>[] = [];
     for (const member of members) {
-      notificationService.createNotification(member.id, 'NEW_QUESTION', title, body, family.id).catch(() => {});
-      if (member.apnsToken) pushService.sendApnsPush(member.apnsToken, title, body, 'NEW_QUESTION').catch(() => {});
-      if (member.fcmToken) pushService.sendFcmPush(member.fcmToken, title, body, 'NEW_QUESTION').catch(() => {});
+      const msgs = getPushMessages(member.locale);
+      const title = msgs.newQuestion.title;
+      const body = msgs.newQuestion.body;
+
+      tasks.push(
+        notificationService.createNotification(member.id, 'NEW_QUESTION', title, body, family.id).catch((e) => {
+          console.warn('[Scheduler] 알림 저장 실패:', e);
+        })
+      );
+      if (member.apnsToken) {
+        tasks.push(
+          pushService.sendApnsPush(member.apnsToken, title, body, 'NEW_QUESTION').catch((e) => {
+            console.warn('[Scheduler] APNs 푸시 실패:', e);
+          })
+        );
+      }
+      if (member.fcmToken) {
+        tasks.push(
+          pushService.sendFcmPush(member.fcmToken, title, body, 'NEW_QUESTION').catch((e) => {
+            console.warn('[Scheduler] FCM 푸시 실패:', e);
+          })
+        );
+      }
     }
+    await Promise.all(tasks);
   }
 
   console.log(`[Scheduler] Assigned daily questions to ${assigned} families`);

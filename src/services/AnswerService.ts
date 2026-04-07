@@ -9,6 +9,8 @@ import {
 import { Errors } from '../middleware/errorHandler';
 import { NotificationService } from './NotificationService';
 import { PushNotificationService } from './PushNotificationService';
+import { tryFinalizeDailyQuestion } from './dailyQuestionCompletion';
+import { getPushMessages } from '../utils/i18n/push';
 
 const notificationService = new NotificationService();
 const pushService = new PushNotificationService();
@@ -38,13 +40,15 @@ export class AnswerService {
     }
 
     // 해당 질문이 사용자의 가족에 배정된 질문인지 검증
+    let activeDailyQuestion: { id: string } | null = null;
     if (user.familyId) {
       const dailyQuestion = await prisma.dailyQuestion.findFirst({
         where: { questionId: normalizedQuestionId, familyId: user.familyId },
       });
       if (!dailyQuestion) {
-        throw Errors.badRequest('이 질문은 가족에 배정되지 않았습니다.');
+        throw Errors.badRequest('이 질문은 그룹에 배정되지 않았습니다.');
       }
+      activeDailyQuestion = dailyQuestion;
     }
 
     // 이미 답변했는지 확인
@@ -93,16 +97,50 @@ export class AnswerService {
 
       const otherMembers = await prisma.user.findMany({
         where: { familyId: user.familyId, id: { not: user.id } },
-        select: { id: true, apnsToken: true, fcmToken: true },
+        select: { id: true, apnsToken: true, fcmToken: true, locale: true },
       });
 
-      const title = `${senderNickname}님이 답변했어요!`;
-      const body = '오늘의 질문에 새 답변이 올라왔어요. 확인해보세요 🌿';
-
+      // Lambda에서는 fire-and-forget 패턴이 안 됨 — 핸들러가 응답하면 runtime이 frozen 처리되어
+      // 백그라운드 HTTP/2 APNs 연결이 중단됨. 모든 푸시 작업을 await 처리.
+      const tasks: Promise<unknown>[] = [];
       for (const member of otherMembers) {
-        notificationService.createNotification(member.id, 'MEMBER_ANSWERED', title, body, user.familyId, senderColorId).catch(() => {});
-        if (member.apnsToken) pushService.sendApnsPush(member.apnsToken, title, body, 'MEMBER_ANSWERED').catch(() => {});
-        if (member.fcmToken) pushService.sendFcmPush(member.fcmToken, title, body, 'MEMBER_ANSWERED', senderColorId).catch(() => {});
+        const msgs = getPushMessages(member.locale);
+        const title = msgs.memberAnswered.title(senderNickname);
+        const body = msgs.memberAnswered.body;
+
+        tasks.push(
+          notificationService.createNotification(member.id, 'MEMBER_ANSWERED', title, body, user.familyId, senderColorId).catch((e) => {
+            console.warn('[Answer] 알림 저장 실패:', e);
+          })
+        );
+        if (member.apnsToken) {
+          tasks.push(
+            pushService.sendApnsPush(member.apnsToken, title, body, 'MEMBER_ANSWERED').catch((e) => {
+              console.warn('[Answer] APNs 푸시 실패:', e);
+            })
+          );
+        }
+        if (member.fcmToken) {
+          tasks.push(
+            pushService.sendFcmPush(member.fcmToken, title, body, 'MEMBER_ANSWERED', senderColorId).catch((e) => {
+              console.warn('[Answer] FCM 푸시 실패:', e);
+            })
+          );
+        }
+      }
+      await Promise.all(tasks);
+
+      // 그룹 전원이 이번 답변으로 완료되었다면 DailyQuestion.date 를 오늘(KST)로 이동
+      // → history 상 "완료일자" 기준으로 기록되도록
+      if (activeDailyQuestion) {
+        try {
+          await tryFinalizeDailyQuestion({
+            familyId: user.familyId,
+            dailyQuestionId: activeDailyQuestion.id,
+          });
+        } catch (e) {
+          console.warn('[Answer] DQ finalize 실패:', e);
+        }
       }
     }
 

@@ -9,6 +9,7 @@ import {
   PaginatedResponse,
 } from '../models';
 import { Errors } from '../middleware/errorHandler';
+import { tryFinalizeDailyQuestion } from './dailyQuestionCompletion';
 
 export class QuestionService {
   /**
@@ -41,7 +42,7 @@ export class QuestionService {
   async getTodayQuestion(userId: string, lang: 'ko' | 'en' | 'ja' = 'ko'): Promise<DailyQuestionResponse> {
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) throw Errors.notFound('사용자');
-    if (!user.familyId) throw Errors.badRequest('가족에 속해 있지 않습니다.');
+    if (!user.familyId) throw Errors.badRequest('그룹에 속해 있지 않습니다.');
 
     const today = this.getToday();
     const familyId = user.familyId;
@@ -78,7 +79,15 @@ export class QuestionService {
   }
 
   /**
-   * 특정 질문에 대해 해당 가족의 모든 멤버가 답변 또는 패스했는지 확인
+   * 특정 질문에 대해 해당 가족의 모든 멤버가 답변 또는 패스했는지 확인.
+   *
+   * 이전 구현은 "배정일 KST 1일 윈도우 안에 작성된 답변" 만 카운트했지만,
+   * 그러면 배정 다음날 이후에 답변이 들어온 경우 완료 판정이 영원히 안 돼서
+   * 답변이 history 에서 사라지는 버그가 있었다.
+   *
+   * 이제는 해당 questionId 에 대한 그룹 멤버의 답변을 시간 제한 없이 집계하고,
+   * 완료된 시점에 tryFinalizeDailyQuestion() 이 DailyQuestion.date 를 완료일자로
+   * 이동시키는 방식으로 처리한다.
    */
   private async isQuestionCompleted(familyId: string, questionId: string, date: Date): Promise<boolean> {
     const memberships = await prisma.familyMembership.findMany({
@@ -86,14 +95,11 @@ export class QuestionService {
       select: { userId: true, skippedDate: true },
     });
 
-    const kstDayStart = new Date(date.getTime() - 9 * 60 * 60 * 1000);
-    const kstDayEnd = new Date(date.getTime() + 15 * 60 * 60 * 1000);
     const answeredUserIds = new Set(
       (await prisma.answer.findMany({
         where: {
           questionId,
           userId: { in: memberships.map((m) => m.userId) },
-          createdAt: { gte: kstDayStart, lt: kstDayEnd },
         },
         select: { userId: true },
       })).map((a) => a.userId)
@@ -116,7 +122,7 @@ export class QuestionService {
   async skipTodayQuestion(userId: string): Promise<SkipQuestionResponse> {
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) throw Errors.notFound('사용자');
-    if (!user.familyId) throw Errors.badRequest('가족에 속해 있지 않습니다.');
+    if (!user.familyId) throw Errors.badRequest('그룹에 속해 있지 않습니다.');
 
     const today = this.getToday();
     const familyId = user.familyId;
@@ -180,8 +186,18 @@ export class QuestionService {
       }),
     ]);
 
+    // 이번 패스로 그룹 전원이 완료 상태가 되었다면 DQ.date 를 오늘(KST)로 이동
+    try {
+      await tryFinalizeDailyQuestion({
+        familyId,
+        dailyQuestionId: dailyQuestion.id,
+      });
+    } catch (e) {
+      console.warn('[Skip] DQ finalize 실패:', e);
+    }
+
     return {
-      message: '질문을 패스했습니다. 다른 가족의 답변을 확인해보세요.',
+      message: '질문을 패스했습니다. 다른 멤버의 답변을 확인해보세요.',
       heartsRemaining: updatedMembership.hearts,
     };
   }
@@ -272,13 +288,11 @@ export class QuestionService {
     ]);
 
     const data: DailyQuestionHistoryResponse[] = dailyQuestions.map((dq) => {
-      // 해당 DailyQuestion의 KST 날짜 범위 내에 작성된 답변만 포함
-      // (다른 날짜나 다른 가족 컨텍스트에서 같은 질문에 작성된 답변 누출 방지)
-      const kstDayStart = new Date(dq.date.getTime() - 9 * 60 * 60 * 1000);
-      const kstDayEnd = new Date(dq.date.getTime() + 15 * 60 * 60 * 1000);
-      const answers = dq.question.answers.filter(
-        (a) => a.createdAt >= kstDayStart && a.createdAt < kstDayEnd
-      );
+      // 해당 질문에 대한 그룹 멤버들의 답변 전체를 포함.
+      // (이전에는 "DQ.date 기준 KST 하루 창" 으로 필터링했으나, 배정일 다음날 이후에
+      //  답변이 들어온 경우 history 에서 사라지는 데이터 손실 버그가 있었다.
+      //  완료 시점에 DQ.date 자체가 완료일자로 이동하므로 윈도우 필터 불필요.)
+      const answers = dq.question.answers;
       const answerSummaries: HistoryAnswerSummary[] = answers.map((a) => ({
         id: a.id,
         userId: a.userId,
@@ -339,7 +353,7 @@ export class QuestionService {
   async createCustomQuestion(userId: string, content: string, lang: 'ko' | 'en' | 'ja' = 'ko'): Promise<CreateCustomQuestionResponse> {
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) throw Errors.notFound('사용자');
-    if (!user.familyId) throw Errors.badRequest('가족에 속해 있지 않습니다.');
+    if (!user.familyId) throw Errors.badRequest('그룹에 속해 있지 않습니다.');
     const familyId = user.familyId;
 
     // 하트 잔액 확인 (3개 이상 필요 — FamilyMembership 기준)
@@ -381,7 +395,7 @@ export class QuestionService {
       },
     });
     if (existingAnswerCount > 0) {
-      throw Errors.conflict('이미 가족 중 누군가가 답변했습니다. 답변이 없을 때만 나만의 질문을 작성할 수 있습니다.');
+      throw Errors.conflict('이미 그룹 멤버 중 누군가가 답변했습니다. 답변이 없을 때만 나만의 질문을 작성할 수 있습니다.');
     }
 
     const trimmedContent = content.trim();

@@ -75,7 +75,7 @@ export function createApp(): Express {
   <div class="card">
     <div class="logo"><svg width="64" height="64" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="#66BB6A"/><circle cx="24" cy="30" r="5" fill="#1A1A1A"/><circle cx="24" cy="30" r="4" fill="#1A1A1A" stroke="#fff" stroke-width="1.5"/><circle cx="40" cy="30" r="5" fill="#1A1A1A"/><circle cx="40" cy="30" r="4" fill="#1A1A1A" stroke="#fff" stroke-width="1.5"/></svg></div>
     <h1>몽글 초대</h1>
-    <p class="subtitle">가족이 초대 링크를 보냈어요.<br>몽글에서 함께해요!</p>
+    <p class="subtitle">친구가 초대 링크를 보냈어요.<br>몽글에서 함께해요!</p>
     <div class="code-box">
       <div class="code-label">초대 코드</div>
       <div class="code">${code}</div>
@@ -88,6 +88,95 @@ export function createApp(): Express {
   };
   app.get('/join/:code', inviteLandingHandler);
   app.get('/invite/:code', inviteLandingHandler);
+
+  // Apple Sign-In 콜백 (Android용 — Custom Tab OAuth form_post 플로우)
+  //
+  // 플로우:
+  //   Android 앱 → Custom Tab(appleid.apple.com/auth/authorize?response_mode=form_post)
+  //   → 사용자 Apple 로그인
+  //   → Apple이 application/x-www-form-urlencoded 로 이 엔드포인트에 POST
+  //   → 서버가 monggle://apple-callback?id_token=...&code=... 로 리다이렉트
+  //   → AndroidManifest.xml 의 monggle://apple-callback intent-filter가 받음
+  //   → handleAppleCallback() → AuthService.socialLogin('apple', ...)
+  //
+  // 주의: 이 엔드포인트는 토큰을 검증하지 않고 중계만 한다. 실제 검증은
+  // POST /auth/social (AuthService.verifyAppleIdentityToken) 에서 수행.
+  const appleCallbackHandler = (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const idToken = typeof body.id_token === 'string' ? body.id_token : '';
+    const code = typeof body.code === 'string' ? body.code : '';
+    const state = typeof body.state === 'string' ? body.state : '';
+    const userField = typeof body.user === 'string' ? body.user : '';
+
+    if (!idToken || !code) {
+      res.status(400).send('Missing id_token or code');
+      return;
+    }
+
+    // user 필드는 Apple이 최초 로그인 시에만 JSON 문자열로 전달
+    // 예: {"name":{"firstName":"Hong","lastName":"Gildong"},"email":"..."}
+    let name = '';
+    let email = '';
+    if (userField) {
+      try {
+        const parsed = JSON.parse(userField) as {
+          name?: { firstName?: string; lastName?: string };
+          email?: string;
+        };
+        const firstName = parsed.name?.firstName ?? '';
+        const lastName = parsed.name?.lastName ?? '';
+        name = `${firstName} ${lastName}`.trim();
+        email = parsed.email ?? '';
+      } catch {
+        // user 파싱 실패는 무시 (id_token/code 만으로도 로그인 가능)
+      }
+    }
+
+    const params = new URLSearchParams();
+    params.set('id_token', idToken);
+    params.set('code', code);
+    if (name) params.set('name', name);
+    if (email) params.set('email', email);
+    if (state) params.set('state', state);
+
+    const deepLink = `monggle://apple-callback?${params.toString()}`;
+
+    // POST로 들어왔으므로 custom scheme 리다이렉트는 HTML 중간 페이지로 수행
+    // (일부 Custom Tab 구현은 POST 302 → custom scheme 전환을 막기 때문)
+    // JSON.stringify 로 JS 문자열 이스케이프 처리
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(`<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>로그인 중...</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:linear-gradient(180deg,#FFF8F0 0%,#EFF8F1 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:#fff;border-radius:20px;padding:40px 32px;max-width:320px;width:100%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.08)}
+.msg{color:#56A96B;font-size:16px;font-weight:600;margin-top:16px}
+.hint{font-size:12px;color:#AAA;margin-top:12px;line-height:1.5}
+.spinner{width:32px;height:32px;border:3px solid #E8F5EA;border-top-color:#56A96B;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="card">
+<div class="spinner"></div>
+<div class="msg">앱으로 돌아가는 중...</div>
+<p class="hint">잠시 후 자동으로 몽글 앱이 열립니다.</p>
+</div>
+<script>window.location.href=${JSON.stringify(deepLink)};</script>
+</body>
+</html>`);
+  };
+  app.post('/auth/apple/callback', appleCallbackHandler);
+  // GET은 사용자가 실수로 URL을 브라우저에 붙여넣었을 때의 폴백 (Apple은 POST만 보냄)
+  app.get('/auth/apple/callback', (_req, res) => {
+    res.status(405).send('Apple Sign-In callback accepts POST only.');
+  });
 
   // Swagger UI 설정 (개발 환경)
   if (!isProduction) {

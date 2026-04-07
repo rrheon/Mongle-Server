@@ -2,6 +2,7 @@ import prisma from '../utils/prisma';
 import { Errors } from '../middleware/errorHandler';
 import { NotificationService } from './NotificationService';
 import { PushNotificationService } from './PushNotificationService';
+import { getPushMessages } from '../utils/i18n/push';
 
 const notificationService = new NotificationService();
 const pushService = new PushNotificationService();
@@ -13,7 +14,7 @@ export class NudgeService {
   async sendNudge(senderUserId: string, targetUserId: string): Promise<{ message: string; heartsRemaining: number }> {
     const sender = await prisma.user.findUnique({ where: { userId: senderUserId } });
     if (!sender) throw Errors.notFound('사용자');
-    if (!sender.familyId) throw Errors.badRequest('가족에 속해 있지 않습니다.');
+    if (!sender.familyId) throw Errors.badRequest('그룹에 속해 있지 않습니다.');
 
     // 하트 잔액 확인 (1개 이상 필요 — FamilyMembership 기준)
     const senderMembership = await prisma.familyMembership.findUnique({
@@ -35,7 +36,7 @@ export class NudgeService {
       },
       include: { user: true },
     });
-    if (!targetMembership) throw Errors.notFound('대상 가족 구성원');
+    if (!targetMembership) throw Errors.notFound('대상 그룹 구성원');
     const target = targetMembership.user;
 
     // 자기 자신에게 재촉 불가
@@ -53,31 +54,46 @@ export class NudgeService {
       where: { userId_familyId: { userId: sender.id, familyId: sender.familyId } },
     });
 
-    // 재촉 알림 DB 저장 (대상 유저 알림함에 노출)
+    // 재촉 알림 (수신자 locale 기준 로컬라이즈)
     const senderNickname = senderMembership?.nickname ?? sender.name;
     const senderColorId = senderMembership?.colorId ?? 'loved';
+    const msgs = getPushMessages(target.locale);
+    const nudgeTitle = msgs.nudge.title;
+    const nudgeBody = msgs.nudge.body(senderNickname);
+
     await notificationService.createNotification(
       target.id,
       'ANSWER_REQUEST',
-      `${senderNickname}님이 답변을 재촉했어요!`,
-      '오늘의 질문에 아직 답변하지 않았어요. 지금 바로 답변해보세요 🌿',
+      nudgeTitle,
+      nudgeBody,
       sender.familyId ?? undefined,
       senderColorId
     );
 
-    // APNs 실시간 푸시 발송 (iOS)
+    // 푸시 발송 — Lambda 환경에서는 반드시 await 해야 함.
+    // (await 없이 .catch() 만 걸면 핸들러가 응답 후 Lambda runtime이 frozen 처리되어
+    //  HTTP/2 APNs 연결이 중단되고 푸시가 실제로 전송되지 않음.)
+    const pushTasks: Promise<void>[] = [];
     if (target.apnsToken) {
-      pushService.sendNudgePush(target.apnsToken, senderNickname).catch(() => {});
+      pushTasks.push(
+        pushService.sendApnsPush(target.apnsToken, nudgeTitle, nudgeBody, 'ANSWER_REQUEST').catch((e) => {
+          console.warn('[Nudge] APNs 푸시 실패:', e);
+        })
+      );
     }
-    // FCM 실시간 푸시 발송 (Android)
     if (target.fcmToken) {
-      pushService.sendFcmPush(
-        target.fcmToken,
-        '재촉하기 알림',
-        `${senderNickname}님이 오늘의 질문에 답변해달라고 합니다 🌿`,
-        'ANSWER_REQUEST'
-      ).catch(() => {});
+      pushTasks.push(
+        pushService.sendFcmPush(
+          target.fcmToken,
+          nudgeTitle,
+          nudgeBody,
+          'ANSWER_REQUEST'
+        ).catch((e) => {
+          console.warn('[Nudge] FCM 푸시 실패:', e);
+        })
+      );
     }
+    await Promise.all(pushTasks);
 
     return {
       message: `${target.name}에게 재촉 알림을 보냈습니다.`,

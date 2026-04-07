@@ -65,9 +65,11 @@ export async function expressAuthentication(
   const [bearer, token] = authHeader.split(' ');
   if (bearer !== 'Bearer' || !token) throw new Error('Invalid authorization header format');
 
+  // 매 요청의 Accept-Language 를 user.locale 로 동기화 → 푸시 다국어 문구 선택에 사용
+  const acceptLanguage = request.headers['accept-language'] as string | undefined;
   const recordAccessSilently = (userId: string) => {
     import('../services/UserService').then(({ UserService }) => {
-      new UserService().recordAccess(userId).catch(() => {});
+      new UserService().recordAccess(userId, acceptLanguage).catch(() => {});
     });
   };
 

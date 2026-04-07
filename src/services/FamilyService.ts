@@ -93,7 +93,7 @@ export class FamilyService {
     const family = await prisma.family.findUnique({
       where: { inviteCode: data.inviteCode.toUpperCase() },
     });
-    if (!family) throw Errors.notFound('가족');
+    if (!family) throw Errors.notFound('그룹');
 
     // 이미 이 가족 멤버인지 확인
     const existing = await prisma.familyMembership.findUnique({
@@ -158,7 +158,7 @@ export class FamilyService {
       where: { userId_familyId: { userId: user.id, familyId: normalizedFamilyId } },
     });
     if (!membership && user.familyId !== normalizedFamilyId) {
-      throw Errors.forbidden('해당 가족에 대한 접근 권한이 없습니다.');
+      throw Errors.forbidden('해당 그룹에 대한 접근 권한이 없습니다.');
     }
 
     return this.getFamilyWithMembers(normalizedFamilyId);
@@ -178,7 +178,7 @@ export class FamilyService {
       : null;
 
     if (!user || (!membership && user.familyId !== normalizedFamilyId)) {
-      throw Errors.forbidden('해당 가족에 대한 접근 권한이 없습니다.');
+      throw Errors.forbidden('해당 그룹에 대한 접근 권한이 없습니다.');
     }
 
     const memberships = await prisma.familyMembership.findMany({
@@ -335,7 +335,7 @@ export class FamilyService {
     if (!user) throw Errors.notFound('사용자');
 
     const targetFamilyId = familyId ?? user.familyId;
-    if (!targetFamilyId) throw Errors.badRequest('가족에 속해 있지 않습니다.');
+    if (!targetFamilyId) throw Errors.badRequest('그룹에 속해 있지 않습니다.');
 
     const family = await prisma.family.findUnique({ where: { id: targetFamilyId } });
 
@@ -356,7 +356,7 @@ export class FamilyService {
 
       if (memberCount > 1) {
         // 다른 멤버가 있으면 위임 후 나가야 함
-        throw Errors.forbidden('가족 생성자는 가족을 떠날 수 없습니다.');
+        throw Errors.forbidden('그룹 생성자는 그룹을 떠날 수 없습니다.');
       }
 
       // 혼자인 경우: 가족 자체를 삭제
@@ -404,10 +404,10 @@ export class FamilyService {
     const normalizedNewCreatorId = newCreatorId.toLowerCase();
 
     const user = await prisma.user.findUnique({ where: { userId } });
-    if (!user || !user.familyId) throw Errors.badRequest('가족에 속해 있지 않습니다.');
+    if (!user || !user.familyId) throw Errors.badRequest('그룹에 속해 있지 않습니다.');
 
     const family = await prisma.family.findUnique({ where: { id: user.familyId } });
-    if (!family) throw Errors.notFound('가족');
+    if (!family) throw Errors.notFound('그룹');
     if (family.createdById !== user.id) throw Errors.forbidden('방장만 위임할 수 있습니다.');
     if (normalizedNewCreatorId === user.id) throw Errors.badRequest('자기 자신에게 위임할 수 없습니다.');
 
@@ -434,13 +434,13 @@ export class FamilyService {
       include: { family: true },
     });
 
-    if (!admin || !admin.familyId) throw Errors.badRequest('가족에 속해 있지 않습니다.');
+    if (!admin || !admin.familyId) throw Errors.badRequest('그룹에 속해 있지 않습니다.');
 
     const familyId = admin.familyId;
 
     // 방장 여부 확인
     if (admin.family?.createdById !== admin.id) {
-      throw Errors.forbidden('가족 방장만 구성원을 내보낼 수 있습니다.');
+      throw Errors.forbidden('그룹 방장만 구성원을 내보낼 수 있습니다.');
     }
 
     // 자기 자신은 내보낼 수 없음
@@ -451,7 +451,7 @@ export class FamilyService {
       where: { userId_familyId: { userId: normalizedTargetId, familyId } },
       include: { user: true },
     });
-    if (!targetMembership) throw Errors.notFound('대상 가족 구성원');
+    if (!targetMembership) throw Errors.notFound('대상 그룹 구성원');
 
     await prisma.$transaction(async (tx) => {
       // FamilyMembership 레코드 삭제
@@ -491,7 +491,7 @@ export class FamilyService {
     });
 
     if (!family) {
-      throw Errors.notFound('가족');
+      throw Errors.notFound('그룹');
     }
 
     const memberIds = family.memberships.map((m) => m.userId);
