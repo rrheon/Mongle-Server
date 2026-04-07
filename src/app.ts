@@ -227,19 +227,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   return app;
 }
 
-// 로컬 개발용 스케줄러: 5분마다 KST 자정 여부 체크 후 질문 배정
+// 로컬 개발용 스케줄러: 5분마다 KST 정오 여부 체크 후 질문 배정
 function startDailyQuestionScheduler() {
   async function checkAndAssign() {
     const now = new Date();
-    // KST 자정 = UTC 15:00
-    if (now.getUTCHours() !== 15 || now.getUTCMinutes() > 5) return;
+    // KST 정오 = UTC 03:00
+    if (now.getUTCHours() !== 3 || now.getUTCMinutes() > 5) return;
     await assignDailyQuestions().catch((err) =>
       console.error('[Scheduler] Failed to assign daily questions:', err)
     );
   }
 
   setInterval(checkAndAssign, 5 * 60 * 1000);
-  console.log('⏰ Daily question scheduler started (runs at KST midnight / UTC 15:00)');
+  console.log('⏰ Daily question scheduler started (runs at KST noon / UTC 03:00)');
 }
 
 // 로컬 개발 서버

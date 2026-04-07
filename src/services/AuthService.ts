@@ -3,6 +3,7 @@ import jwksClient from 'jwks-rsa';
 import prisma from '../utils/prisma';
 import { signToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
 import { Errors } from '../middleware/errorHandler';
+import { LEGAL_VERSIONS } from '../utils/legalVersions';
 
 // iOS 네이티브 Apple Sign-In → aud = App Bundle ID (예: com.yongheon.Mongle)
 // Android Custom Tab Apple OAuth → aud = Services ID (예: com.mongle.app.signin)
@@ -153,6 +154,11 @@ export interface SocialLoginResult {
   token: string;
   // eslint-disable-next-line @typescript-eslint/naming-convention
   refresh_token: string;
+  // 약관/개인정보 동의가 필요하면 true. 클라이언트는 이 값이 true 일 때
+  // 동의 화면으로 라우팅하고 POST /auth/consent 로 동의 결과를 보내야 한다.
+  needsConsent: boolean;
+  requiredConsents: Array<'terms' | 'privacy'>;
+  legalVersions: { terms: string; privacy: string };
 }
 
 export interface TokenRefreshResult {
@@ -241,6 +247,10 @@ export class AuthService {
     const token = signToken(jwtPayload);
     const refresh_token = signRefreshToken(jwtPayload);
 
+    const requiredConsents: Array<'terms' | 'privacy'> = [];
+    if (user.termsAcceptedVersion !== LEGAL_VERSIONS.terms) requiredConsents.push('terms');
+    if (user.privacyAcceptedVersion !== LEGAL_VERSIONS.privacy) requiredConsents.push('privacy');
+
     return {
       user: {
         id: user.id,
@@ -253,6 +263,56 @@ export class AuthService {
       },
       token,
       refresh_token,
+      needsConsent: requiredConsents.length > 0,
+      requiredConsents,
+      legalVersions: { terms: LEGAL_VERSIONS.terms, privacy: LEGAL_VERSIONS.privacy },
+    };
+  }
+
+  /**
+   * 약관/개인정보 동의 저장.
+   * 클라이언트는 동의 화면에서 사용자가 동의한 후 현재 버전을 그대로 전달한다.
+   * 서버는 전달된 버전이 LEGAL_VERSIONS 와 일치하는지 검증한다 (오래된 클라이언트 방어).
+   */
+  async submitConsent(
+    userId: string,
+    payload: { termsVersion?: string; privacyVersion?: string }
+  ): Promise<{ termsAcceptedVersion: string | null; privacyAcceptedVersion: string | null }> {
+    const data: {
+      termsAcceptedVersion?: string;
+      termsAcceptedAt?: Date;
+      privacyAcceptedVersion?: string;
+      privacyAcceptedAt?: Date;
+    } = {};
+    const now = new Date();
+
+    if (payload.termsVersion) {
+      if (payload.termsVersion !== LEGAL_VERSIONS.terms) {
+        throw Errors.badRequest(
+          `terms 버전 불일치: 클라이언트=${payload.termsVersion}, 서버=${LEGAL_VERSIONS.terms}`
+        );
+      }
+      data.termsAcceptedVersion = payload.termsVersion;
+      data.termsAcceptedAt = now;
+    }
+    if (payload.privacyVersion) {
+      if (payload.privacyVersion !== LEGAL_VERSIONS.privacy) {
+        throw Errors.badRequest(
+          `privacy 버전 불일치: 클라이언트=${payload.privacyVersion}, 서버=${LEGAL_VERSIONS.privacy}`
+        );
+      }
+      data.privacyAcceptedVersion = payload.privacyVersion;
+      data.privacyAcceptedAt = now;
+    }
+
+    if (Object.keys(data).length === 0) {
+      throw Errors.badRequest('동의할 약관이 지정되지 않았습니다.');
+    }
+
+    const updated = await prisma.user.update({ where: { userId }, data });
+    return {
+      termsAcceptedVersion: updated.termsAcceptedVersion,
+      privacyAcceptedVersion: updated.privacyAcceptedVersion,
     };
   }
 

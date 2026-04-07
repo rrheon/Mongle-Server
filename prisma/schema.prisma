@@ -25,6 +25,12 @@ model User {
   fcmToken           String?            @map("fcm_token")
   // Accept-Language 기반 사용자 선호 언어 (ko/en/ja). 서버가 푸시 알림 문구를 다국어로 선택할 때 사용.
   locale             String?            @map("locale")
+  // 약관/개인정보 동의 버전 — Legal/ 폴더 문서 개정 시 LEGAL_VERSIONS 상수 갱신.
+  // 사용자 동의 버전이 현재 버전과 다르면 클라이언트에 needsConsent=true 반환.
+  termsAcceptedVersion   String?   @map("terms_accepted_version")
+  termsAcceptedAt        DateTime? @map("terms_accepted_at")
+  privacyAcceptedVersion String?   @map("privacy_accepted_version")
+  privacyAcceptedAt      DateTime? @map("privacy_accepted_at")
   answers            Answer[]
   memberships        FamilyMembership[]
   moodRecords        MoodRecord[]
