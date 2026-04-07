@@ -55,11 +55,12 @@ provider:
 #      - subnet-0fb66c2fd273d0320
 #      - subnet-0e28e7103a7f0f426
 
-  # API Gateway CORS 설정
+  # API Gateway CORS 설정 — Express(app.ts)에서 화이트리스트 처리하므로 여기는 OPTIONS만 통과시킴
   httpApi:
     cors:
       allowedOrigins:
-        - '*'
+        - https://mongle.app
+        - https://monggle.app
       allowedHeaders:
         - Content-Type
         - Authorization
@@ -71,6 +72,7 @@ provider:
         - PATCH
         - DELETE
         - OPTIONS
+      allowCredentials: true
 
 plugins:
   - serverless-plugin-typescript

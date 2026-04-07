@@ -12,17 +12,6 @@ interface SocialLoginRequest {
   email?: string;
 }
 
-interface EmailSignupRequest {
-  name: string;
-  email: string;
-  password: string;
-}
-
-interface EmailLoginRequest {
-  email: string;
-  password: string;
-}
-
 interface RefreshTokenRequest {
   refresh_token: string;
 }
@@ -45,27 +34,6 @@ export class AuthController extends Controller {
       if (v !== undefined) fields[k] = v;
     }
     return this.authService.socialLogin(provider, fields);
-  }
-
-  /**
-   * 이메일 회원가입
-   * @summary 이메일 회원가입
-   */
-  @Post('email/signup')
-  @SuccessResponse(201, '회원가입 성공')
-  public async emailSignup(@Body() body: EmailSignupRequest): Promise<SocialLoginResult> {
-    this.setStatus(201);
-    return this.authService.emailSignup(body.name, body.email, body.password);
-  }
-
-  /**
-   * 이메일 로그인
-   * @summary 이메일 로그인
-   */
-  @Post('email/login')
-  @SuccessResponse(200, '로그인 성공')
-  public async emailLogin(@Body() body: EmailLoginRequest): Promise<SocialLoginResult> {
-    return this.authService.emailLogin(body.email, body.password);
   }
 
   /**

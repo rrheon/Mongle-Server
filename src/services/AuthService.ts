@@ -1,16 +1,23 @@
 import jwt from 'jsonwebtoken';
 import jwksClient from 'jwks-rsa';
-import bcrypt from 'bcryptjs';
 import prisma from '../utils/prisma';
 import { signToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
 import { Errors } from '../middleware/errorHandler';
+
+const APPLE_BUNDLE_ID = process.env.APPLE_BUNDLE_ID || '';
+const APPLE_ISSUER = 'https://appleid.apple.com';
 
 async function verifyAppleIdentityToken(identityToken: string): Promise<{ sub: string; email?: string }> {
   const client = jwksClient({ jwksUri: 'https://appleid.apple.com/auth/keys' });
   const decoded = jwt.decode(identityToken, { complete: true }) as jwt.Jwt | null;
   if (!decoded?.header?.kid) throw new Error('Invalid Apple identity token');
   const key = await client.getSigningKey(decoded.header.kid as string);
-  const payload = jwt.verify(identityToken, key.getPublicKey(), { algorithms: ['RS256'] }) as jwt.JwtPayload;
+  const verifyOptions: jwt.VerifyOptions = {
+    algorithms: ['RS256'],
+    issuer: APPLE_ISSUER,
+  };
+  if (APPLE_BUNDLE_ID) verifyOptions.audience = APPLE_BUNDLE_ID;
+  const payload = jwt.verify(identityToken, key.getPublicKey(), verifyOptions) as jwt.JwtPayload;
   return { sub: payload.sub as string, email: payload.email as string | undefined };
 }
 
@@ -30,21 +37,43 @@ async function fetchKakaoUserInfo(accessToken: string): Promise<{ id: string; em
   };
 }
 
+const KAKAO_REST_API_KEY = process.env.KAKAO_REST_API_KEY || '';
+const KAKAO_ISSUER = 'https://kauth.kakao.com';
+
 async function verifyKakaoIdToken(idToken: string): Promise<{ sub: string; email?: string }> {
   const client = jwksClient({ jwksUri: 'https://kauth.kakao.com/.well-known/jwks.json' });
   const decoded = jwt.decode(idToken, { complete: true }) as jwt.Jwt | null;
   if (!decoded?.header?.kid) throw new Error('Invalid Kakao identity token');
   const key = await client.getSigningKey(decoded.header.kid as string);
-  const payload = jwt.verify(idToken, key.getPublicKey(), { algorithms: ['RS256'] }) as jwt.JwtPayload;
+  const verifyOptions: jwt.VerifyOptions = {
+    algorithms: ['RS256'],
+    issuer: KAKAO_ISSUER,
+  };
+  if (KAKAO_REST_API_KEY) verifyOptions.audience = KAKAO_REST_API_KEY;
+  const payload = jwt.verify(idToken, key.getPublicKey(), verifyOptions) as jwt.JwtPayload;
   return { sub: payload.sub as string, email: payload.email as string | undefined };
 }
+
+const GOOGLE_CLIENT_IDS = (process.env.GOOGLE_CLIENT_ID || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 async function verifyGoogleIdToken(idToken: string): Promise<{ sub: string; email?: string; name?: string }> {
   const client = jwksClient({ jwksUri: 'https://www.googleapis.com/oauth2/v3/certs' });
   const decoded = jwt.decode(idToken, { complete: true }) as jwt.Jwt | null;
   if (!decoded?.header?.kid) throw new Error('Invalid Google ID token');
   const key = await client.getSigningKey(decoded.header.kid as string);
-  const payload = jwt.verify(idToken, key.getPublicKey(), { algorithms: ['RS256'] }) as jwt.JwtPayload;
+  const verifyOptions: jwt.VerifyOptions = {
+    algorithms: ['RS256'],
+    issuer: ['https://accounts.google.com', 'accounts.google.com'] as [string, string],
+  };
+  if (GOOGLE_CLIENT_IDS.length === 1) {
+    verifyOptions.audience = GOOGLE_CLIENT_IDS[0];
+  } else if (GOOGLE_CLIENT_IDS.length > 1) {
+    verifyOptions.audience = GOOGLE_CLIENT_IDS as [string, ...string[]];
+  }
+  const payload = jwt.verify(idToken, key.getPublicKey(), verifyOptions) as jwt.JwtPayload;
   return { sub: payload.sub as string, email: payload.email as string | undefined, name: payload.name as string | undefined };
 }
 
@@ -133,61 +162,6 @@ export class AuthService {
     const token = signToken(jwtPayload);
     const refresh_token = signRefreshToken(jwtPayload);
 
-    return {
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        profileImageUrl: user.profileImageUrl,
-        role: user.role,
-        familyId: user.familyId,
-        createdAt: user.createdAt,
-      },
-      token,
-      refresh_token,
-    };
-  }
-
-  async emailSignup(name: string, email: string, password: string): Promise<SocialLoginResult> {
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) throw Errors.conflict('이미 사용 중인 이메일입니다.');
-    if (password.length < 6) throw Errors.badRequest('비밀번호는 최소 6자 이상이어야 합니다.');
-
-    const passwordHash = await bcrypt.hash(password, 10);
-    const userId = `email:${email}`;
-
-    const user = await prisma.user.create({
-      data: { userId, email, name, passwordHash, role: 'OTHER' },
-    });
-
-    const jwtPayload = { sub: user.userId, email: user.email };
-    const token = signToken(jwtPayload);
-    const refresh_token = signRefreshToken(jwtPayload);
-    return {
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        profileImageUrl: user.profileImageUrl,
-        role: user.role,
-        familyId: user.familyId,
-        createdAt: user.createdAt,
-      },
-      token,
-      refresh_token,
-    };
-  }
-
-  async emailLogin(email: string, password: string): Promise<SocialLoginResult> {
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !user.passwordHash) throw Errors.unauthorized('이메일 또는 비밀번호가 올바르지 않습니다.');
-
-    const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) throw Errors.unauthorized('이메일 또는 비밀번호가 올바르지 않습니다.');
-
-    const jwtPayload = { sub: user.userId, email: user.email };
-    const token = signToken(jwtPayload);
-    const refresh_token = signRefreshToken(jwtPayload);
     return {
       user: {
         id: user.id,

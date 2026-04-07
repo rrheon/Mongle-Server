@@ -5,6 +5,7 @@ import path from 'path';
 import swaggerUi from 'swagger-ui-express';
 import { RegisterRoutes } from './routes/routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+import { socialLoginLimiter, refreshTokenLimiter } from './middleware/rateLimiter';
 import { assignDailyQuestions } from './scheduler';
 
 // Express 앱 생성
@@ -16,7 +17,29 @@ export function createApp(): Express {
   app.use(helmet({
     contentSecurityPolicy: isProduction, // production: 활성화 / dev: Swagger UI를 위해 비활성화
   }));
-  app.use(cors());
+
+  // CORS — 프로덕션은 화이트리스트, 개발은 모두 허용
+  // 모바일 앱(Origin 헤더 없음)은 항상 허용
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        // 모바일 앱(WKWebView/OkHttp)은 Origin 헤더가 없음 — 항상 허용
+        if (!origin) return callback(null, true);
+        // 개발 환경은 모두 허용
+        if (!isProduction) return callback(null, true);
+        // 프로덕션은 화이트리스트만
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+        return callback(new Error(`CORS: origin not allowed: ${origin}`));
+      },
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'Accept-Language'],
+    })
+  );
   app.use(json());
   app.use(urlencoded({ extended: true }));
 
@@ -82,9 +105,9 @@ export function createApp(): Express {
     }
   }
 
-  // HTTP 요청 로깅 (개발 환경) - 민감 필드(password, token) 마스킹
+  // HTTP 요청 로깅 (개발 환경) - 민감 필드 마스킹
   if (!isProduction) {
-    const SENSITIVE_KEYS = new Set(['password', 'token', 'accessToken', 'refreshToken', 'secret']);
+    const SENSITIVE_KEYS = new Set(['token', 'accessToken', 'refreshToken', 'secret', 'identity_token', 'id_token', 'access_token']);
     app.use((req, _res, next) => {
       let logBody: Record<string, unknown> | undefined;
       if (req.body && Object.keys(req.body).length) {
@@ -98,6 +121,10 @@ export function createApp(): Express {
       next();
     });
   }
+
+  // 인증 엔드포인트에 rate limit 적용 (tsoa 라우트 등록 전에 미들웨어 등록)
+  app.use('/auth/social', socialLoginLimiter);
+  app.use('/auth/refresh', refreshTokenLimiter);
 
   // API 라우트 등록 (tsoa가 생성)
   RegisterRoutes(app);

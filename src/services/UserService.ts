@@ -217,18 +217,26 @@ export class UserService {
   }
 
   /**
-   * DB ID로 사용자 조회
+   * DB ID로 사용자 조회 — 본인 또는 같은 가족 구성원만 조회 가능 (IDOR 방지)
    */
-  async getUserById(id: string): Promise<UserResponse> {
-    const user = await prisma.user.findUnique({
-      where: { id },
-    });
+  async getUserById(requestingUserId: string, targetId: string): Promise<UserResponse> {
+    const target = await prisma.user.findUnique({ where: { id: targetId } });
+    if (!target) throw Errors.notFound('사용자');
 
-    if (!user) {
-      throw Errors.notFound('사용자');
+    // 본인 조회는 항상 허용
+    if (target.userId === requestingUserId) {
+      return this.toUserResponse(target);
     }
 
-    return this.toUserResponse(user);
+    // 그 외는 같은 가족 구성원이어야 함
+    const requester = await prisma.user.findUnique({ where: { userId: requestingUserId } });
+    if (!requester) throw Errors.unauthorized('인증된 사용자를 찾을 수 없습니다.');
+
+    if (!requester.familyId || requester.familyId !== target.familyId) {
+      throw Errors.forbidden('해당 사용자 정보에 접근할 권한이 없습니다.');
+    }
+
+    return this.toUserResponse(target);
   }
 
   /**

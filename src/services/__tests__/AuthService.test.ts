@@ -47,7 +47,6 @@ const mockDbUser = {
   role: 'OTHER',
   familyId: null,
   createdAt: new Date('2026-01-01'),
-  passwordHash: null,
 };
 
 describe('AuthService.refreshToken', () => {
