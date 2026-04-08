@@ -1,24 +1,25 @@
 # Terms of Service
 
-**Effective Date**: [Month DD, YYYY]  
-**Last Updated**: [Month DD, YYYY]
+**Effective Date**: April 8, 2026  
+**Last Updated**: April 8, 2026
 
 ---
 
 ## 1. Acceptance of Terms
 
-By downloading, installing, or using the Mongle app ("Service"), you agree to be bound by these Terms of Service ("Terms"). If you do not agree, do not use the Service.
+By downloading, installing, or using the Monggle app ("Service"), you agree to be bound by these Terms of Service ("Terms"). If you do not agree, do not use the Service.
 
-The Service is operated by [Developer Name] ("we," "us," or "our").
+The Service is operated by Yongheon Choi ("we," "us," or "our").
 
 ---
 
 ## 2. Eligibility
 
-- **Ages 13 and older** may use the Service directly.
-- **Children under 13** (under 14 for Korean users) may use the Service only with **verifiable parental or legal guardian consent**.
-- By using the Service on behalf of a minor, you confirm you are the parent or legal guardian and consent to these Terms on their behalf.
-- Parents and guardians may contact us at [CONTACT_EMAIL] to review, modify, or delete their child's information.
+- **Users in the United States**: The Service is not directed to children under the age of 13. By using the Service, you represent that you are at least 13 years old. If you are under 13 and located in the United States, do not use the Service. We do not knowingly collect personal information from U.S. children under 13 without verifiable parental consent as required by COPPA.
+- **Users in the Republic of Korea**: Users aged 14 or older may use the Service directly. Children under 14 may use the Service only with the verifiable consent of a legal representative (parent or guardian).
+- **Users in other regions**: If your local law sets a higher minimum age for digital consent, that higher age applies.
+- By using the Service on behalf of a minor, you represent that you are the parent or legal guardian and consent to these Terms on their behalf.
+- Parents and guardians may contact us at yongheon0806@gmail.com at any time to review, modify, or delete their child's information.
 
 ---
 
@@ -40,9 +41,9 @@ We may update these Terms from time to time. We will notify you of material chan
 ## 5. Service Description
 
 We provide:
-- Family group creation and joining (via invite code)
+- Group creation and joining (via invite code)
 - Daily question and answer features
-- Family member nudge (reminder) functionality
+- Member nudge (reminder) functionality
 - Push notification service
 - Advertising (banner ads and rewarded ads via Google AdMob)
 
@@ -80,7 +81,11 @@ You agree **not** to:
 
 ## 9. Disclaimer of Warranties
 
-THE SERVICE IS PROVIDED "AS IS" WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR NON-INFRINGEMENT. WE DO NOT GUARANTEE THAT THE SERVICE WILL BE ERROR-FREE, UNINTERRUPTED, OR SECURE.
+THE SERVICE IS PROVIDED "AS IS" AND "AS AVAILABLE," WITH ALL FAULTS AND WITHOUT WARRANTY OF ANY KIND. TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, WE EXPRESSLY DISCLAIM ALL WARRANTIES, WHETHER EXPRESS, IMPLIED, STATUTORY, OR OTHERWISE, INCLUDING BUT NOT LIMITED TO ALL IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, QUIET ENJOYMENT, ACCURACY, AND NON-INFRINGEMENT.
+
+WE DO NOT WARRANT THAT (A) THE SERVICE WILL BE SECURE, ERROR-FREE, OR AVAILABLE AT ANY PARTICULAR TIME OR LOCATION; (B) ANY DEFECTS OR ERRORS WILL BE CORRECTED; (C) ANY CONTENT OR INFORMATION OBTAINED BY YOU THROUGH THE SERVICE WILL BE ACCURATE; OR (D) THE RESULTS OF USING THE SERVICE WILL MEET YOUR REQUIREMENTS.
+
+YOUR USE OF THE SERVICE IS SOLELY AT YOUR OWN RISK. SOME JURISDICTIONS DO NOT ALLOW THE EXCLUSION OF IMPLIED WARRANTIES, SO THE ABOVE EXCLUSION MAY NOT APPLY TO YOU.
 
 ---
 
@@ -124,6 +129,5 @@ Any disputes shall first be attempted to be resolved through good-faith negotiat
 
 | | |
 |---|---|
-| Name | [Developer Name] |
-| Email | [CONTACT_EMAIL] |
-| Address | [ADDRESS] |
+| Name | Yongheon Choi |
+| Email | yongheon0806@gmail.com |
