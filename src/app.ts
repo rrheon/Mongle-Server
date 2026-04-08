@@ -46,9 +46,15 @@ export function createApp(): Express {
   // 정적 파일 서빙 (.well-known/apple-app-site-association, .well-known/assetlinks.json)
   app.use(express.static(path.join(__dirname, '..', 'public')));
 
-  // 초대 링크 랜딩 페이지 (앱 미설치 시 폴백 페이지)
+  // 초대 링크 랜딩 페이지
+  // 배포 전이라 커스텀 도메인 없음 — Universal Link 불가.
+  // 대신 페이지 로드 즉시 monggle://join/CODE 커스텀 스킴으로 자동 전환한다.
+  // (앱이 설치된 경우만 대상이며, 설치되지 않았다면 페이지가 그대로 남음.)
   const inviteLandingHandler = (req: Request, res: Response) => {
     const code = (req.params.code || '').toUpperCase();
+    // 커스텀 스킴은 영숫자/대문자만 — 코드가 이상하면 XSS 방지 차원에서 막아둔다.
+    const safeCode = /^[A-Z0-9]{1,16}$/.test(code) ? code : '';
+    const deepLink = safeCode ? `monggle://join/${safeCode}` : '';
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(`<!DOCTYPE html>
 <html lang="ko">
@@ -78,11 +84,20 @@ export function createApp(): Express {
     <p class="subtitle">친구가 초대 링크를 보냈어요.<br>몽글에서 함께해요!</p>
     <div class="code-box">
       <div class="code-label">초대 코드</div>
-      <div class="code">${code}</div>
+      <div class="code">${safeCode || '--------'}</div>
     </div>
-    <a class="open-btn" href="monggle://join/${code}">앱에서 열기</a>
-    <p class="hint">앱이 설치되어 있지 않다면<br>App Store 또는 Google Play에서 다운로드해 주세요.</p>
+    <a class="open-btn" href="monggle://join/${safeCode}">앱에서 열기</a>
+    <p class="hint">버튼이 동작하지 않는다면<br>몽글 앱이 설치되어 있는지 확인해 주세요.</p>
   </div>
+  <script>
+    // 페이지 로드 즉시 커스텀 스킴으로 자동 전환 (앱이 설치된 경우 앱이 열림)
+    (function () {
+      var deepLink = ${JSON.stringify(deepLink)};
+      if (!deepLink) return;
+      // iOS Safari는 location.href 할당으로 충분, Android Chrome은 동일하게 동작
+      setTimeout(function () { window.location.href = deepLink; }, 50);
+    })();
+  </script>
 </body>
 </html>`);
   };
