@@ -14,7 +14,8 @@
 | Swagger 문서 | ✅ 완료 |
 | iOS 앱 연동 | ✅ 완료 |
 | Android 앱 연동 | ✅ 완료 |
-| AWS 배포 | ⏳ 대기 |
+| AWS 배포 (Lambda + API Gateway) | ✅ 완료 (dev stage) |
+| 커스텀 도메인 | ⏳ 대기 (monggle.app 미보유) |
 
 ---
 
@@ -36,7 +37,7 @@
 ### 서버 시작
 
 ```bash
-cd /Users/yong/Desktop/FamTreeServer
+cd /Users/yong/Desktop/MongleServer
 
 # 개발 모드 (자동 재시작)
 npm run dev
@@ -66,7 +67,7 @@ open http://localhost:3000/docs
 ## 프로젝트 구조
 
 ```
-FamTreeServer/
+MongleServer/
 ├── src/
 │   ├── controllers/      # API 엔드포인트 (9개)
 │   │   ├── HealthController.ts
@@ -121,8 +122,6 @@ FamTreeServer/
 | Method | Path | 설명 |
 |--------|------|------|
 | POST | `/auth/social` | 소셜 로그인 (Apple/Kakao/Google) |
-| POST | `/auth/email/signup` | 이메일 회원가입 |
-| POST | `/auth/email/login` | 이메일 로그인 |
 | POST | `/auth/refresh` | 토큰 갱신 |
 | DELETE | `/auth/account` | 계정 삭제 |
 
@@ -189,6 +188,14 @@ FamTreeServer/
 |--------|------|------|
 | POST | `/nudge` | 가족에게 재촉 알림 (하트 1개 차감) |
 
+### 초대 링크 랜딩 (Static HTML)
+
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/join/:code` | 초대 코드 랜딩 페이지. 로드 즉시 `monggle://join/{code}` 커스텀 스킴으로 자동 전환하여 설치된 앱을 연다 (커스텀 도메인 미보유 상태의 임시 경로) |
+| GET | `/.well-known/apple-app-site-association` | iOS Universal Link용 AASA 파일 (도메인 확보 후 활성화 예정) |
+| GET | `/.well-known/assetlinks.json` | Android App Link 검증용 (도메인 확보 후 활성화 예정) |
+
 ---
 
 ## 하트 시스템
@@ -254,5 +261,8 @@ npm run deploy:dev
 |--------|------|
 | `FamTree` (iOS) | Swift + TCA 기반 iOS 앱 |
 | `Mongle-Android` | Kotlin + Jetpack Compose Android 앱 |
+
+정적 약관/개인정보 문서는 `public/legal/` 하위에 ko/en/ja 3개 언어로 보관되어 있으며,
+클라이언트는 Notion 페이지 URL 로 직접 링크한다.
 
 자세한 API 명세: `http://localhost:3000/docs` 또는 `docs/API_SPEC.md`
