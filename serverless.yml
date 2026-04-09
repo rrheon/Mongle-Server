@@ -33,6 +33,14 @@ provider:
     APNS_PRIVATE_KEY: ${env:APNS_PRIVATE_KEY, ''}
     # Apple Sign-In audience 검증 (iOS 앱 ID + Android Services ID 콤마 구분)
     APPLE_BUNDLE_ID: ${env:APPLE_BUNDLE_ID, ''}
+    # 이메일 인증코드 발송용 SMTP (POST /auth/email/request-code)
+    # 미설정 시 dev fallback(JSON transport) — 실제 발송 안 되고 CloudWatch 로그에 code 만 남음.
+    SMTP_HOST: ${env:SMTP_HOST, ''}
+    SMTP_PORT: ${env:SMTP_PORT, ''}
+    SMTP_SECURE: ${env:SMTP_SECURE, ''}
+    SMTP_USER: ${env:SMTP_USER, ''}
+    SMTP_PASS: ${env:SMTP_PASS, ''}
+    SMTP_FROM: ${env:SMTP_FROM, ''}
 
   # IAM 권한 (최소 권한 원칙)
   iam:

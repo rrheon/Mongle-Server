@@ -31,6 +31,8 @@ model User {
   termsAcceptedAt        DateTime? @map("terms_accepted_at")
   privacyAcceptedVersion String?   @map("privacy_accepted_version")
   privacyAcceptedAt      DateTime? @map("privacy_accepted_at")
+  // 이메일/비밀번호 로그인용 bcrypt 해시. 소셜 전용 계정이면 NULL.
+  passwordHash           String?   @map("password_hash")
   answers            Answer[]
   memberships        FamilyMembership[]
   moodRecords        MoodRecord[]
@@ -153,6 +155,23 @@ model MoodRecord {
 
   @@unique([userId, date])
   @@map("mood_records")
+}
+
+/// 이메일 회원가입용 인증코드 저장소.
+/// 사용자가 email+password 로 가입을 시도하면 6자리 코드를 해시하여 저장한다.
+/// 회원가입 완료(consumed=true) 후에는 cleanup 대상.
+model EmailVerification {
+  id         String   @id @default(uuid())
+  email      String
+  purpose    String   @default("SIGNUP") // 'SIGNUP' | 'LOGIN' 등 확장 여지
+  codeHash   String   @map("code_hash")
+  expiresAt  DateTime @map("expires_at")
+  attempts   Int      @default(0)
+  consumed   Boolean  @default(false)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([email, purpose])
+  @@map("email_verifications")
 }
 
 enum UserRole {

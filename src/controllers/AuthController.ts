@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Post, Request, Route, Security, SuccessResponse, Tags } from 'tsoa';
 import { AuthRequest } from '../middleware/auth';
 import { AuthService, SocialLoginResult, TokenRefreshResult } from '../services/AuthService';
+import { EmailAuthService } from '../services/EmailAuthService';
 
 interface SocialLoginRequest {
   provider: 'apple' | 'kakao' | 'google';
@@ -26,10 +27,34 @@ interface ConsentResponse {
   privacyAcceptedVersion: string | null;
 }
 
+interface EmailRequestCodeRequest {
+  email: string;
+}
+
+interface EmailRequestCodeResponse {
+  sent: true;
+  expiresInSec: number;
+}
+
+interface EmailSignupRequest {
+  email: string;
+  password: string;
+  code: string;
+  name?: string;
+  termsVersion: string;
+  privacyVersion: string;
+}
+
+interface EmailLoginRequest {
+  email: string;
+  password: string;
+}
+
 @Route('auth')
 @Tags('Auth')
 export class AuthController extends Controller {
   private authService = new AuthService();
+  private emailAuthService = new EmailAuthService();
 
   /**
    * 소셜 로그인 (Apple / Kakao / Google)
@@ -81,6 +106,40 @@ export class AuthController extends Controller {
     @Body() body: ConsentRequest
   ): Promise<ConsentResponse> {
     return this.authService.submitConsent(req.user.userId, body);
+  }
+
+  /**
+   * 이메일 회원가입용 6자리 인증코드 발송.
+   * 이미 가입된 이메일이면 409. 10분간 유효.
+   * @summary 이메일 인증코드 요청
+   */
+  @Post('email/request-code')
+  @SuccessResponse(200, '코드 발송 성공')
+  public async requestEmailCode(
+    @Body() body: EmailRequestCodeRequest
+  ): Promise<EmailRequestCodeResponse> {
+    return this.emailAuthService.requestSignupCode(body.email);
+  }
+
+  /**
+   * 이메일 회원가입 완료. 인증코드 검증 후 유저 생성.
+   * 약관 동의는 가입 이전 단계이므로 클라이언트가 termsVersion/privacyVersion 을 함께 전달한다.
+   * @summary 이메일 회원가입
+   */
+  @Post('email/signup')
+  @SuccessResponse(200, '회원가입 성공')
+  public async emailSignup(@Body() body: EmailSignupRequest): Promise<SocialLoginResult> {
+    return this.emailAuthService.signup(body);
+  }
+
+  /**
+   * 이메일/비밀번호 로그인 (기존 회원)
+   * @summary 이메일 로그인
+   */
+  @Post('email/login')
+  @SuccessResponse(200, '로그인 성공')
+  public async emailLogin(@Body() body: EmailLoginRequest): Promise<SocialLoginResult> {
+    return this.emailAuthService.login(body.email, body.password);
   }
 
   /**

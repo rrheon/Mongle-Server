@@ -12,6 +12,11 @@ import { assignDailyQuestions } from './scheduler';
 export function createApp(): Express {
   const app = express();
 
+  // API Gateway → Lambda 는 클라이언트 IP 를 X-Forwarded-For 헤더로 전달한다.
+  // trust proxy 를 1 로 설정해야 express-rate-limit 이 실제 클라이언트 IP 로 집계한다.
+  // (기본값 false 이면 모든 요청이 동일 IP 로 취급돼 rate limit 이 사실상 무력화됨)
+  app.set('trust proxy', 1);
+
   // 미들웨어 설정
   const isProduction = process.env.NODE_ENV === 'production';
   app.use(helmet({
@@ -229,6 +234,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   // 인증 엔드포인트에 rate limit 적용 (tsoa 라우트 등록 전에 미들웨어 등록)
   app.use('/auth/social', socialLoginLimiter);
   app.use('/auth/refresh', refreshTokenLimiter);
+  // 이메일 인증 코드/가입/로그인도 brute-force 방어 대상
+  app.use('/auth/email/request-code', socialLoginLimiter);
+  app.use('/auth/email/signup', socialLoginLimiter);
+  app.use('/auth/email/login', socialLoginLimiter);
 
   // API 라우트 등록 (tsoa가 생성)
   RegisterRoutes(app);
