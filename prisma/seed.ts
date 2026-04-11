@@ -229,8 +229,45 @@ const questions = [
   { content: '가족 덕분에 내가 성장했다고 느낀 일이 있나요?', contentEn: 'Is there a time you felt you grew because of your family?', contentJa: '家族のおかげで自分が成長したと感じたことはありますか？', category: 'GRATITUDE' },
 ];
 
+// v2: 배지 정의 마스터 seed (멱등). PRD §4.2.
+const badgeDefinitions: Array<{
+  code: string;
+  category: 'STREAK' | 'ANSWER_COUNT';
+  thresholdNumeric: number;
+  iconKey: string;
+}> = [
+  { code: 'STREAK_3',   category: 'STREAK',       thresholdNumeric: 3,   iconKey: 'badge_streak_3'   },
+  { code: 'STREAK_7',   category: 'STREAK',       thresholdNumeric: 7,   iconKey: 'badge_streak_7'   },
+  { code: 'STREAK_30',  category: 'STREAK',       thresholdNumeric: 30,  iconKey: 'badge_streak_30'  },
+  { code: 'STREAK_100', category: 'STREAK',       thresholdNumeric: 100, iconKey: 'badge_streak_100' },
+  { code: 'ANSWERS_10', category: 'ANSWER_COUNT', thresholdNumeric: 10,  iconKey: 'badge_answers_10' },
+  { code: 'ANSWERS_50', category: 'ANSWER_COUNT', thresholdNumeric: 50,  iconKey: 'badge_answers_50' },
+];
+
+async function seedBadgeDefinitions() {
+  for (const def of badgeDefinitions) {
+    await prisma.badgeDefinition.upsert({
+      where: { code: def.code },
+      update: {
+        category: def.category,
+        thresholdNumeric: def.thresholdNumeric,
+        iconKey: def.iconKey,
+      },
+      create: {
+        code: def.code,
+        category: def.category,
+        thresholdNumeric: def.thresholdNumeric,
+        iconKey: def.iconKey,
+      },
+    });
+  }
+  console.log(`✅ Seeded ${badgeDefinitions.length} badge definitions`);
+}
+
 async function main() {
   console.log('🌱 Seeding database...');
+
+  await seedBadgeDefinitions();
 
   const existingCount = await prisma.question.count({ where: { isCustom: false } });
 

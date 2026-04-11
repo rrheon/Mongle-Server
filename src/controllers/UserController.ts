@@ -13,13 +13,25 @@ import {
   SuccessResponse,
 } from 'tsoa';
 import { AuthRequest } from '../middleware/auth';
-import { UserResponse, UpdateUserRequest, AdHeartRewardRequest, HeartRewardResponse } from '../models';
+import {
+  UserResponse,
+  UpdateUserRequest,
+  AdHeartRewardRequest,
+  HeartRewardResponse,
+  CharacterStageResponse,
+  BadgeListResponse,
+  MarkBadgesSeenRequest,
+} from '../models';
 import { UserService } from '../services/UserService';
+import { CharacterStageService } from '../services/CharacterStageService';
+import { BadgeService } from '../services/BadgeService';
 
 @Route('users')
 @Tags('Users')
 export class UserController extends Controller {
   private userService = new UserService();
+  private characterStageService = new CharacterStageService();
+  private badgeService = new BadgeService();
 
   /**
    * 현재 로그인한 사용자 정보 조회
@@ -101,6 +113,49 @@ export class UserController extends Controller {
   ): Promise<HeartRewardResponse> {
     const heartsRemaining = await this.userService.grantAdHearts(req.user.userId, body.amount);
     return { heartsRemaining };
+  }
+
+  /**
+   * 내 캐릭터 스테이지 조회 (streak 기반)
+   * @summary 캐릭터 스테이지 조회
+   */
+  @Get('me/character-stage')
+  @Security('jwt')
+  @SuccessResponse(200, '성공')
+  public async getMyCharacterStage(
+    @Request() req: AuthRequest,
+  ): Promise<CharacterStageResponse> {
+    return this.characterStageService.getForUser(req.user.userId);
+  }
+
+  /**
+   * 내 배지 목록 조회 (획득 목록 + 전체 정의)
+   * @summary 배지 목록 조회
+   */
+  @Get('me/badges')
+  @Security('jwt')
+  @SuccessResponse(200, '성공')
+  public async getMyBadges(@Request() req: AuthRequest): Promise<BadgeListResponse> {
+    const [badges, definitions] = await Promise.all([
+      this.badgeService.listForUser(req.user.userId),
+      this.badgeService.listDefinitions(),
+    ]);
+    return { badges, definitions };
+  }
+
+  /**
+   * 배지 획득 팝업 확인 처리 (seenAt 기록)
+   * @summary 배지 확인 처리
+   */
+  @Post('me/badges/mark-seen')
+  @Security('jwt')
+  @SuccessResponse(200, '성공')
+  public async markBadgesSeen(
+    @Request() req: AuthRequest,
+    @Body() body: MarkBadgesSeenRequest,
+  ): Promise<{ ok: boolean }> {
+    await this.badgeService.markSeen(req.user.userId, body.codes);
+    return { ok: true };
   }
 
   /**

@@ -21,6 +21,11 @@ interface PushMessages {
   memberAnswered: { title: (senderName: string) => string; body: string };
   answerReminder: { title: string; body: string };
   nudge: { title: string; body: (senderName: string) => string };
+  // v2: streak 위험 알림 (KST 21:00 streakRiskScheduler). {n} = 현재 streak.
+  streakRisk: { title: string; body: (streakDays: number) => string };
+  // v2: 배지 획득 푸시. 배지 이름은 클라이언트 Localizable 에서 풀지만
+  // 푸시 단계에서는 사전 정의된 고정 문구만 보낸다 (PRD §4.3).
+  badgeEarned: { title: string; body: string };
 }
 
 const messagesByLocale: Record<Locale, PushMessages> = {
@@ -41,6 +46,14 @@ const messagesByLocale: Record<Locale, PushMessages> = {
       title: '재촉하기 알림',
       body: (name) => `${name}님이 오늘의 질문에 답변해달라고 합니다 🌿`,
     },
+    streakRisk: {
+      title: '🌿 연속 기록이 곧 끊겨요',
+      body: (n) => `지금 오늘의 질문에 답하면 ${n}일 연속을 지킬 수 있어요.`,
+    },
+    badgeEarned: {
+      title: '새 배지를 받았어요! 🎉',
+      body: '설정 > 내 배지에서 확인해보세요.',
+    },
   },
   en: {
     newQuestion: {
@@ -59,6 +72,14 @@ const messagesByLocale: Record<Locale, PushMessages> = {
       title: 'A gentle nudge',
       body: (name) => `${name} is waiting for your answer on today's question 🌿`,
     },
+    streakRisk: {
+      title: '🌿 Your streak is about to end',
+      body: (n) => `Answer today's question now to keep your ${n}-day streak.`,
+    },
+    badgeEarned: {
+      title: 'You earned a new badge! 🎉',
+      body: 'Check it out in Settings > My Badges.',
+    },
   },
   ja: {
     newQuestion: {
@@ -76,6 +97,14 @@ const messagesByLocale: Record<Locale, PushMessages> = {
     nudge: {
       title: 'リマインドが届きました',
       body: (name) => `${name}さんが今日の質問への回答を待っています 🌿`,
+    },
+    streakRisk: {
+      title: '🌿 連続記録が途切れそうです',
+      body: (n) => `今日の質問に答えて${n}日連続を守りましょう。`,
+    },
+    badgeEarned: {
+      title: '新しいバッジを獲得しました！ 🎉',
+      body: '設定 > マイバッジで確認できます。',
     },
   },
 };
@@ -107,4 +136,16 @@ export function normalizeLocale(locale: string | null | undefined): Locale {
  */
 export function getPushMessages(locale: string | null | undefined): PushMessages {
   return messagesByLocale[normalizeLocale(locale)];
+}
+
+/**
+ * 배지 획득 푸시 문구 반환. badgeCode 는 현재 제목/본문 로컬라이즈에는 관여하지 않지만
+ * 향후 배지별 차별 문구를 추가할 때 확장점으로 시그니처에 포함.
+ */
+export function getBadgePushMessages(
+  locale: string | null | undefined,
+  _badgeCode: string,
+): { title: string; body: string } {
+  const msgs = messagesByLocale[normalizeLocale(locale)];
+  return { title: msgs.badgeEarned.title, body: msgs.badgeEarned.body };
 }

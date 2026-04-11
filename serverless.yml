@@ -143,6 +143,16 @@ functions:
           rate: cron(0 12 * * ? *)
           enabled: true
 
+  # v2: Streak 위험 알림 (KST 21:00 = UTC 12:00)
+  # 오늘 미답변 + 어제 답변 + streak >= 2 사용자에게 1회 푸시. PRD §3.
+  streakRiskScheduler:
+    handler: src/streakRiskScheduler.handler
+    timeout: 60
+    events:
+      - schedule:
+          rate: cron(0 12 * * ? *)
+          enabled: true
+
 # 리소스 정의 (선택사항 - 별도 CloudFormation으로 관리 권장)
 # resources:
 #   Resources:

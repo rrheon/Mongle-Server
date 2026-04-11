@@ -27,6 +27,8 @@ export class UserService {
           hearts: membership.hearts,
           moodId: membership.colorId ?? user.moodId ?? null,
           createdAt: user.createdAt,
+          streakRiskNotify: user.streakRiskNotify,
+          badgeEarnedNotify: user.badgeEarnedNotify,
         };
       }
     }
@@ -95,10 +97,17 @@ export class UserService {
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) throw Errors.notFound('사용자');
 
-    // 글로벌 업데이트: moodId, profileImageUrl
-    const globalUpdates: { profileImageUrl?: string; moodId?: string } = {};
+    // 글로벌 업데이트: moodId, profileImageUrl, 알림 토글
+    const globalUpdates: {
+      profileImageUrl?: string;
+      moodId?: string;
+      streakRiskNotify?: boolean;
+      badgeEarnedNotify?: boolean;
+    } = {};
     if (data.profileImageUrl !== undefined) globalUpdates.profileImageUrl = data.profileImageUrl;
     if (data.moodId !== undefined) globalUpdates.moodId = data.moodId;
+    if (data.streakRiskNotify !== undefined) globalUpdates.streakRiskNotify = data.streakRiskNotify;
+    if (data.badgeEarnedNotify !== undefined) globalUpdates.badgeEarnedNotify = data.badgeEarnedNotify;
 
     if (Object.keys(globalUpdates).length > 0) {
       await prisma.user.update({ where: { userId }, data: globalUpdates });
@@ -267,6 +276,8 @@ export class UserService {
     hearts: number;
     moodId?: string | null;
     createdAt: Date;
+    streakRiskNotify?: boolean;
+    badgeEarnedNotify?: boolean;
   }): UserResponse {
     return {
       id: user.id,
@@ -278,6 +289,8 @@ export class UserService {
       hearts: user.hearts,
       moodId: user.moodId ?? null,
       createdAt: user.createdAt,
+      streakRiskNotify: user.streakRiskNotify ?? true,
+      badgeEarnedNotify: user.badgeEarnedNotify ?? true,
     };
   }
 }

@@ -17,6 +17,11 @@ export interface UserResponse {
   hearts: number;
   moodId: string | null;
   createdAt: Date;
+  // v2: 알림 옵트아웃 토글 (둘 다 기본 true). PRD §11-9.
+  // 본인 정보(GET /users/me, PUT /users/me) 응답에서만 채워진다. 다른 가족 멤버를
+  // 가리키는 응답에서는 undefined — 타인의 토글 상태를 노출하지 않음.
+  streakRiskNotify?: boolean;
+  badgeEarnedNotify?: boolean;
 }
 
 export interface UpdateUserRequest {
@@ -24,6 +29,9 @@ export interface UpdateUserRequest {
   profileImageUrl?: string;
   role?: UserRole;
   moodId?: string;
+  // v2: 알림 토글. 누락 시 변경 없음.
+  streakRiskNotify?: boolean;
+  badgeEarnedNotify?: boolean;
 }
 
 export interface AdHeartRewardRequest {
@@ -167,6 +175,46 @@ export interface FamilyAnswersResponse {
   totalCount: number;
   myAnswer: AnswerResponse | null;
   memberStatuses: MemberAnswerStatus[];
+}
+
+// ============================================
+// v2: Character Stage / Badges
+// ============================================
+export type CharacterStageKey = 'SEED' | 'SPROUT' | 'LEAF' | 'BUD' | 'BLOOM' | 'RADIANCE';
+
+export interface CharacterStageResponse {
+  stage: number;
+  stageKey: CharacterStageKey;
+  streakDays: number;
+  nextStageStreak: number | null;
+  sizeMultiplier: number;
+}
+
+export type BadgeCategoryKey = 'STREAK' | 'ANSWER_COUNT';
+
+export interface BadgeDefinitionDTO {
+  code: string;
+  category: BadgeCategoryKey;
+  iconKey: string;
+  thresholdNumeric: number | null;
+}
+
+export interface UserBadgeDTO {
+  code: string;
+  category: BadgeCategoryKey;
+  iconKey: string;
+  thresholdNumeric: number | null;
+  awardedAt: string;
+  seenAt: string | null;
+}
+
+export interface BadgeListResponse {
+  badges: UserBadgeDTO[];
+  definitions: BadgeDefinitionDTO[];
+}
+
+export interface MarkBadgesSeenRequest {
+  codes: string[];
 }
 
 // ============================================

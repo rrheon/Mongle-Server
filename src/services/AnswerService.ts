@@ -9,11 +9,13 @@ import {
 import { Errors } from '../middleware/errorHandler';
 import { NotificationService } from './NotificationService';
 import { PushNotificationService } from './PushNotificationService';
+import { BadgeService } from './BadgeService';
 import { tryFinalizeDailyQuestion } from './dailyQuestionCompletion';
 import { getPushMessages } from '../utils/i18n/push';
 
 const notificationService = new NotificationService();
 const pushService = new PushNotificationService();
+const badgeService = new BadgeService();
 
 export class AnswerService {
 
@@ -142,6 +144,13 @@ export class AnswerService {
           console.warn('[Answer] DQ finalize 실패:', e);
         }
       }
+    }
+
+    // v2: 배지 수여 훅 — streak/답변 수 기반. 실패해도 응답은 성공으로 유지.
+    try {
+      await badgeService.checkAndAward(user.id, userId);
+    } catch (e) {
+      console.warn('[Answer] 배지 수여 실패:', e);
     }
 
     return this.toAnswerResponse(answer);
