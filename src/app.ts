@@ -55,6 +55,8 @@ export function createApp(): Express {
   // 배포 전이라 커스텀 도메인 없음 — Universal Link 불가.
   // 대신 페이지 로드 즉시 monggle://join/CODE 커스텀 스킴으로 자동 전환한다.
   // (앱이 설치된 경우만 대상이며, 설치되지 않았다면 페이지가 그대로 남음.)
+  const APP_STORE_URL = 'https://apps.apple.com/kr/app/%EB%AA%BD%EA%B8%80-monggle/id6761920716';
+
   const inviteLandingHandler = (req: Request, res: Response) => {
     const code = (req.params.code || '').toUpperCase();
     // 커스텀 스킴은 영숫자/대문자만 — 코드가 이상하면 XSS 방지 차원에서 막아둔다.
@@ -74,32 +76,41 @@ export function createApp(): Express {
     .logo{margin-bottom:16px}
     h1{font-size:24px;font-weight:700;color:#1A1A1A;margin-bottom:8px}
     .subtitle{font-size:15px;color:#888;margin-bottom:32px;line-height:1.5}
-    .code-box{background:#F0F9F2;border-radius:12px;padding:20px;margin-bottom:32px}
+    .code-box{background:#F0F9F2;border-radius:12px;padding:20px;margin-bottom:24px}
     .code-label{font-size:12px;color:#56A96B;font-weight:600;margin-bottom:8px}
     .code{font-size:28px;font-weight:700;letter-spacing:6px;color:#56A96B}
     .open-btn{display:block;width:100%;padding:16px;background:#56A96B;color:#fff;border:none;border-radius:14px;font-size:16px;font-weight:600;cursor:pointer;text-decoration:none;margin-bottom:12px}
     .open-btn:active{opacity:.8}
     .hint{font-size:12px;color:#AAA;line-height:1.6}
+    .hint a{color:#56A96B;text-decoration:underline}
+    .store-links{font-size:13px;color:#888;margin-top:8px}
+    .store-links a{color:#56A96B;text-decoration:underline;font-weight:600}
+    .store-links .disabled{color:#CCC;text-decoration:none;cursor:default}
   </style>
 </head>
 <body>
   <div class="card">
     <div class="logo"><svg width="64" height="64" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="#66BB6A"/><circle cx="24" cy="30" r="5" fill="#1A1A1A"/><circle cx="24" cy="30" r="4" fill="#1A1A1A" stroke="#fff" stroke-width="1.5"/><circle cx="40" cy="30" r="5" fill="#1A1A1A"/><circle cx="40" cy="30" r="4" fill="#1A1A1A" stroke="#fff" stroke-width="1.5"/></svg></div>
     <h1>몽글 초대</h1>
-    <p class="subtitle">친구가 초대 링크를 보냈어요.<br>몽글에서 함께해요!</p>
+    <p class="subtitle">가족이 초대 링크를 보냈어요.<br>몽글에서 함께해요!</p>
     <div class="code-box">
       <div class="code-label">초대 코드</div>
       <div class="code">${safeCode || '--------'}</div>
     </div>
-    <a class="open-btn" href="monggle://join/${safeCode}">앱에서 열기</a>
-    <p class="hint">버튼이 동작하지 않는다면<br>몽글 앱이 설치되어 있는지 확인해 주세요.</p>
+    <a class="open-btn" id="openAppBtn" href="monggle://join/${safeCode}">앱에서 열기</a>
+    <p class="hint">몽글 앱이 설치되어 있는지 확인해 주세요.</p>
+    <p class="store-links">
+      <a href="${APP_STORE_URL}">iOS 설치</a>
+      &nbsp;|&nbsp;
+      <span class="disabled">안드로이드 설치 (준비중)</span>
+    </p>
   </div>
   <script>
-    // 페이지 로드 즉시 커스텀 스킴으로 자동 전환 (앱이 설치된 경우 앱이 열림)
+    // 커스텀 스킴으로 앱 열기 시도
+    // 앱이 설치되어 있으면 스킴 호출로 앱이 열리고, 없으면 페이지가 그대로 남음.
     (function () {
       var deepLink = ${JSON.stringify(deepLink)};
       if (!deepLink) return;
-      // iOS Safari는 location.href 할당으로 충분, Android Chrome은 동일하게 동작
       setTimeout(function () { window.location.href = deepLink; }, 50);
     })();
   </script>

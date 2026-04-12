@@ -31,7 +31,7 @@
       background: #F0F9F2;
       border-radius: 12px;
       padding: 20px;
-      margin-bottom: 32px;
+      margin-bottom: 24px;
     }
     .code-label { font-size: 12px; color: #56A96B; font-weight: 600; margin-bottom: 8px; }
     .code {
@@ -56,6 +56,10 @@
     }
     .open-btn:active { opacity: 0.8; }
     .hint { font-size: 12px; color: #AAA; line-height: 1.6; }
+    .hint a { color: #56A96B; text-decoration: underline; }
+    .store-links { font-size: 13px; color: #888; margin-top: 8px; }
+    .store-links a { color: #56A96B; text-decoration: underline; font-weight: 600; }
+    .store-links .disabled { color: #CCC; text-decoration: none; cursor: default; }
   </style>
 </head>
 <body>
@@ -68,16 +72,22 @@
       <div class="code" id="inviteCode">--------</div>
     </div>
     <a class="open-btn" id="openAppBtn" href="#">앱에서 열기</a>
-    <p class="hint">앱이 설치되어 있지 않다면<br>App Store 또는 Google Play에서 다운로드해 주세요.</p>
+    <p class="hint">몽글 앱이 설치되어 있는지 확인해 주세요.</p>
+    <p class="store-links">
+      <a href="https://apps.apple.com/kr/app/%EB%AA%BD%EA%B8%80-monggle/id6761920716">iOS 설치</a>
+      &nbsp;|&nbsp;
+      <span class="disabled">안드로이드 설치 (준비중)</span>
+    </p>
   </div>
 
   <script>
-    const pathParts = window.location.pathname.split('/');
-    const code = pathParts[pathParts.length - 1]?.toUpperCase() || '';
+    var pathParts = window.location.pathname.split('/');
+    var code = (pathParts[pathParts.length - 1] || '').toUpperCase();
     if (code) {
       document.getElementById('inviteCode').textContent = code;
       document.getElementById('openAppBtn').href = 'monggle://join/' + code;
     }
+
   </script>
 </body>
 </html>

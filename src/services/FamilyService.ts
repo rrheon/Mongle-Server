@@ -341,14 +341,14 @@ export class FamilyService {
 
     // 가족 생성자인 경우
     if (family?.createdById === user.id) {
-      // 그룹 생성 후 24시간 이내에는 그룹 삭제 불가 (반복 생성/삭제 방지)
+      // 그룹 생성 후 3일(72시간) 이내에는 그룹 삭제 불가 (반복 생성/삭제 방지)
       // 위임 후 나가기(일반 멤버)는 이 제한에 해당하지 않음
       const hoursSinceCreation = family
         ? (Date.now() - family.createdAt.getTime()) / (1000 * 60 * 60)
-        : 24;
-      if (hoursSinceCreation < 24) {
-        const hoursLeft = Math.ceil(24 - hoursSinceCreation);
-        throw Errors.forbidden(`그룹 생성 후 24시간이 지나야 그룹을 해제할 수 있습니다. (${hoursLeft}시간 후 가능)`);
+        : 72;
+      if (hoursSinceCreation < 72) {
+        const daysLeft = Math.ceil((72 - hoursSinceCreation) / 24);
+        throw Errors.forbidden(`그룹 생성 후 3일이 지나야 그룹을 해제할 수 있습니다. (${daysLeft}일 후 가능)`);
       }
       const memberCount = await prisma.familyMembership.count({
         where: { familyId: targetFamilyId },
