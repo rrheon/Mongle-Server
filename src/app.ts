@@ -91,7 +91,7 @@ export function createApp(): Express {
   <div class="card">
     <div class="logo"><svg width="64" height="64" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="#66BB6A"/><circle cx="24" cy="30" r="5" fill="#1A1A1A"/><circle cx="24" cy="30" r="4" fill="#1A1A1A" stroke="#fff" stroke-width="1.5"/><circle cx="40" cy="30" r="5" fill="#1A1A1A"/><circle cx="40" cy="30" r="4" fill="#1A1A1A" stroke="#fff" stroke-width="1.5"/></svg></div>
     <h1>몽글 초대</h1>
-    <p class="subtitle">친구가 초대 링크를 보냈어요.<br>몽글에서 함께해요!</p>
+    <p class="subtitle">가족이 초대 링크를 보냈어요.<br>몽글에서 함께해요!</p>
     <div class="code-box">
       <div class="code-label">초대 코드</div>
       <div class="code">${safeCode || '--------'}</div>
