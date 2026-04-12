@@ -31,7 +31,7 @@
       background: #F0F9F2;
       border-radius: 12px;
       padding: 20px;
-      margin-bottom: 32px;
+      margin-bottom: 24px;
     }
     .code-label { font-size: 12px; color: #56A96B; font-weight: 600; margin-bottom: 8px; }
     .code {
@@ -55,6 +55,21 @@
       margin-bottom: 12px;
     }
     .open-btn:active { opacity: 0.8; }
+    .store-btn {
+      display: block;
+      width: 100%;
+      padding: 14px;
+      background: white;
+      color: #56A96B;
+      border: 1.5px solid #56A96B;
+      border-radius: 14px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      margin-bottom: 12px;
+    }
+    .store-btn:active { opacity: 0.8; }
     .hint { font-size: 12px; color: #AAA; line-height: 1.6; }
   </style>
 </head>
@@ -68,16 +83,29 @@
       <div class="code" id="inviteCode">--------</div>
     </div>
     <a class="open-btn" id="openAppBtn" href="#">앱에서 열기</a>
-    <p class="hint">앱이 설치되어 있지 않다면<br>App Store 또는 Google Play에서 다운로드해 주세요.</p>
+    <a class="store-btn" id="storeBtn" href="https://apps.apple.com/kr/app/%EB%AA%BD%EA%B8%80-monggle/id6761920716">App Store에서 다운로드</a>
+    <p class="hint">앱이 설치되어 있다면 '앱에서 열기'를,<br>처음이라면 '다운로드' 버튼을 눌러주세요.</p>
   </div>
 
   <script>
-    const pathParts = window.location.pathname.split('/');
-    const code = pathParts[pathParts.length - 1]?.toUpperCase() || '';
+    var pathParts = window.location.pathname.split('/');
+    var code = (pathParts[pathParts.length - 1] || '').toUpperCase();
     if (code) {
       document.getElementById('inviteCode').textContent = code;
       document.getElementById('openAppBtn').href = 'monggle://join/' + code;
     }
+
+    // 플랫폼 감지: Android면 Play Store 버튼으로 교체
+    (function () {
+      var ua = navigator.userAgent || '';
+      if (/android/i.test(ua)) {
+        var btn = document.getElementById('storeBtn');
+        if (btn) {
+          btn.href = 'https://play.google.com/store/apps/details?id=com.mongle.app';
+          btn.textContent = 'Google Play에서 다운로드';
+        }
+      }
+    })();
   </script>
 </body>
 </html>
