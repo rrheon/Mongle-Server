@@ -55,22 +55,11 @@
       margin-bottom: 12px;
     }
     .open-btn:active { opacity: 0.8; }
-    .store-btn {
-      display: block;
-      width: 100%;
-      padding: 14px;
-      background: white;
-      color: #56A96B;
-      border: 1.5px solid #56A96B;
-      border-radius: 14px;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      text-decoration: none;
-      margin-bottom: 12px;
-    }
-    .store-btn:active { opacity: 0.8; }
     .hint { font-size: 12px; color: #AAA; line-height: 1.6; }
+    .hint a { color: #56A96B; text-decoration: underline; }
+    .store-links { font-size: 13px; color: #888; margin-top: 8px; }
+    .store-links a { color: #56A96B; text-decoration: underline; font-weight: 600; }
+    .store-links .disabled { color: #CCC; text-decoration: none; cursor: default; }
   </style>
 </head>
 <body>
@@ -83,8 +72,12 @@
       <div class="code" id="inviteCode">--------</div>
     </div>
     <a class="open-btn" id="openAppBtn" href="#">앱에서 열기</a>
-    <a class="store-btn" id="storeBtn" href="https://apps.apple.com/kr/app/%EB%AA%BD%EA%B8%80-monggle/id6761920716">App Store에서 다운로드</a>
-    <p class="hint">앱이 설치되어 있다면 '앱에서 열기'를,<br>처음이라면 '다운로드' 버튼을 눌러주세요.</p>
+    <p class="hint">몽글 앱이 설치되어 있는지 확인해 주세요.</p>
+    <p class="store-links">
+      <a href="https://apps.apple.com/kr/app/%EB%AA%BD%EA%B8%80-monggle/id6761920716">iOS 설치</a>
+      &nbsp;|&nbsp;
+      <span class="disabled">안드로이드 설치 (준비중)</span>
+    </p>
   </div>
 
   <script>
@@ -95,17 +88,6 @@
       document.getElementById('openAppBtn').href = 'monggle://join/' + code;
     }
 
-    // 플랫폼 감지: Android면 Play Store 버튼으로 교체
-    (function () {
-      var ua = navigator.userAgent || '';
-      if (/android/i.test(ua)) {
-        var btn = document.getElementById('storeBtn');
-        if (btn) {
-          btn.href = 'https://play.google.com/store/apps/details?id=com.mongle.app';
-          btn.textContent = 'Google Play에서 다운로드';
-        }
-      }
-    })();
   </script>
 </body>
 </html>

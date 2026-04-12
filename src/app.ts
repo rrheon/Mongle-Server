@@ -56,7 +56,6 @@ export function createApp(): Express {
   // 대신 페이지 로드 즉시 monggle://join/CODE 커스텀 스킴으로 자동 전환한다.
   // (앱이 설치된 경우만 대상이며, 설치되지 않았다면 페이지가 그대로 남음.)
   const APP_STORE_URL = 'https://apps.apple.com/kr/app/%EB%AA%BD%EA%B8%80-monggle/id6761920716';
-  const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.mongle.app';
 
   const inviteLandingHandler = (req: Request, res: Response) => {
     const code = (req.params.code || '').toUpperCase();
@@ -82,9 +81,11 @@ export function createApp(): Express {
     .code{font-size:28px;font-weight:700;letter-spacing:6px;color:#56A96B}
     .open-btn{display:block;width:100%;padding:16px;background:#56A96B;color:#fff;border:none;border-radius:14px;font-size:16px;font-weight:600;cursor:pointer;text-decoration:none;margin-bottom:12px}
     .open-btn:active{opacity:.8}
-    .store-btn{display:block;width:100%;padding:14px;background:#fff;color:#56A96B;border:1.5px solid #56A96B;border-radius:14px;font-size:15px;font-weight:600;cursor:pointer;text-decoration:none;margin-bottom:12px}
-    .store-btn:active{opacity:.8}
     .hint{font-size:12px;color:#AAA;line-height:1.6}
+    .hint a{color:#56A96B;text-decoration:underline}
+    .store-links{font-size:13px;color:#888;margin-top:8px}
+    .store-links a{color:#56A96B;text-decoration:underline;font-weight:600}
+    .store-links .disabled{color:#CCC;text-decoration:none;cursor:default}
   </style>
 </head>
 <body>
@@ -97,25 +98,16 @@ export function createApp(): Express {
       <div class="code">${safeCode || '--------'}</div>
     </div>
     <a class="open-btn" id="openAppBtn" href="monggle://join/${safeCode}">앱에서 열기</a>
-    <a class="store-btn" id="storeBtn" href="${APP_STORE_URL}">App Store에서 다운로드</a>
-    <p class="hint">앱이 설치되어 있다면 '앱에서 열기'를,<br>처음이라면 '다운로드' 버튼을 눌러주세요.</p>
+    <p class="hint">몽글 앱이 설치되어 있는지 확인해 주세요.</p>
+    <p class="store-links">
+      <a href="${APP_STORE_URL}">iOS 설치</a>
+      &nbsp;|&nbsp;
+      <span class="disabled">안드로이드 설치 (준비중)</span>
+    </p>
   </div>
   <script>
-    // 플랫폼 감지: Android면 Play Store 버튼으로 교체
-    (function () {
-      var ua = navigator.userAgent || '';
-      if (/android/i.test(ua)) {
-        var btn = document.getElementById('storeBtn');
-        if (btn) {
-          btn.href = ${JSON.stringify(PLAY_STORE_URL)};
-          btn.textContent = 'Google Play에서 다운로드';
-        }
-      }
-    })();
-
-    // 커스텀 스킴으로 앱 열기 시도 + fallback
-    // 앱이 설치되어 있으면 스킴 호출로 앱이 열리고, 페이지는 백그라운드로 감.
-    // 앱이 없으면 스킴 호출이 무시되고 페이지가 그대로 남음 — 사용자가 스토어 버튼 클릭 가능.
+    // 커스텀 스킴으로 앱 열기 시도
+    // 앱이 설치되어 있으면 스킴 호출로 앱이 열리고, 없으면 페이지가 그대로 남음.
     (function () {
       var deepLink = ${JSON.stringify(deepLink)};
       if (!deepLink) return;
