@@ -26,56 +26,56 @@ interface PushMessages {
 const messagesByLocale: Record<Locale, PushMessages> = {
   ko: {
     newQuestion: {
-      title: '오늘의 질문이 도착했어요! 🌿',
+      title: '오늘의 질문이 도착했어요!',
       body: '그룹 멤버들과 함께 오늘의 질문에 답변해보세요.',
     },
     memberAnswered: {
       title: (name) => `${name}님이 답변했어요!`,
-      body: '오늘의 질문에 새 답변이 올라왔어요. 확인해보세요 🌿',
+      body: '오늘의 질문에 새 답변이 올라왔어요. 확인해보세요',
     },
     answerReminder: {
-      title: '오늘의 질문, 아직 답변 전이에요 🌿',
+      title: '오늘의 질문, 아직 답변 전이에요',
       body: '그룹 멤버들이 오늘의 질문을 기다리고 있어요. 한마디 남겨볼까요?',
     },
     nudge: {
       title: '재촉하기 알림',
-      body: (name) => `${name}님이 오늘의 질문에 답변해달라고 합니다 🌿`,
+      body: (name) => `${name}님이 오늘의 질문에 답변해달라고 합니다`,
     },
   },
   en: {
     newQuestion: {
-      title: "Today's question is here! 🌿",
+      title: "Today's question is here!",
       body: "Share today's question with your group.",
     },
     memberAnswered: {
       title: (name) => `${name} just answered!`,
-      body: "A new answer was added to today's question. Take a look 🌿",
+      body: "A new answer was added to today's question. Take a look",
     },
     answerReminder: {
-      title: "Today's question is waiting 🌿",
+      title: "Today's question is waiting",
       body: 'Your group is waiting for your answer. Leave a note!',
     },
     nudge: {
       title: 'A gentle nudge',
-      body: (name) => `${name} is waiting for your answer on today's question 🌿`,
+      body: (name) => `${name} is waiting for your answer on today's question`,
     },
   },
   ja: {
     newQuestion: {
-      title: '今日の質問が届きました 🌿',
+      title: '今日の質問が届きました',
       body: 'グループのメンバーと一緒に今日の質問に答えてみましょう。',
     },
     memberAnswered: {
       title: (name) => `${name}さんが回答しました！`,
-      body: '今日の質問に新しい回答が届きました 🌿',
+      body: '今日の質問に新しい回答が届きました',
     },
     answerReminder: {
-      title: 'まだ回答していない質問があります 🌿',
+      title: 'まだ回答していない質問があります',
       body: 'グループのメンバーがあなたの回答を待っています。一言どうですか？',
     },
     nudge: {
       title: 'リマインドが届きました',
-      body: (name) => `${name}さんが今日の質問への回答を待っています 🌿`,
+      body: (name) => `${name}さんが今日の質問への回答を待っています`,
     },
   },
 };
