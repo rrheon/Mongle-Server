@@ -215,20 +215,81 @@ export class UserService {
 
   /**
    * APNs 디바이스 토큰 저장/갱신
+   * 동일 토큰을 보유한 다른 유저가 있으면 해당 유저의 토큰을 null 처리 (중복 푸시 방지)
    */
   async registerDeviceToken(userId: string, token: string): Promise<void> {
+    if (!token) throw Errors.badRequest('디바이스 토큰이 비어 있습니다.');
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) throw Errors.notFound('사용자');
+
+    // 동일 APNs 토큰을 가진 다른 유저의 토큰 제거 (디바이스 1대 = 토큰 1개 원칙)
+    await prisma.user.updateMany({
+      where: { apnsToken: token, id: { not: user.id } },
+      data: { apnsToken: null },
+    });
+
     await prisma.user.update({ where: { id: user.id }, data: { apnsToken: token } });
   }
 
   /**
    * FCM 디바이스 토큰 저장/갱신 (Android)
+   * 동일 토큰을 보유한 다른 유저가 있으면 해당 유저의 토큰을 null 처리 (중복 푸시 방지)
    */
   async registerFcmToken(userId: string, token: string): Promise<void> {
+    if (!token) throw Errors.badRequest('디바이스 토큰이 비어 있습니다.');
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) throw Errors.notFound('사용자');
+
+    // 동일 FCM 토큰을 가진 다른 유저의 토큰 제거
+    await prisma.user.updateMany({
+      where: { fcmToken: token, id: { not: user.id } },
+      data: { fcmToken: null },
+    });
+
     await prisma.user.update({ where: { id: user.id }, data: { fcmToken: token } });
+  }
+
+  /**
+   * 알림 선호도 조회
+   */
+  async getNotificationPreferences(userId: string) {
+    const user = await prisma.user.findUnique({ where: { userId } });
+    if (!user) throw Errors.notFound('사용자');
+    return {
+      notifAnswer: user.notifAnswer,
+      notifNudge: user.notifNudge,
+      notifQuestion: user.notifQuestion,
+      quietHoursEnabled: user.quietHoursEnabled,
+      quietHoursStart: user.quietHoursStart,
+      quietHoursEnd: user.quietHoursEnd,
+    };
+  }
+
+  /**
+   * 알림 선호도 수정
+   */
+  async updateNotificationPreferences(
+    userId: string,
+    data: {
+      notifAnswer?: boolean;
+      notifNudge?: boolean;
+      notifQuestion?: boolean;
+      quietHoursEnabled?: boolean;
+      quietHoursStart?: string;
+      quietHoursEnd?: string;
+    }
+  ) {
+    const user = await prisma.user.findUnique({ where: { userId } });
+    if (!user) throw Errors.notFound('사용자');
+    const updated = await prisma.user.update({ where: { id: user.id }, data });
+    return {
+      notifAnswer: updated.notifAnswer,
+      notifNudge: updated.notifNudge,
+      notifQuestion: updated.notifQuestion,
+      quietHoursEnabled: updated.quietHoursEnabled,
+      quietHoursStart: updated.quietHoursStart,
+      quietHoursEnd: updated.quietHoursEnd,
+    };
   }
 
   /**

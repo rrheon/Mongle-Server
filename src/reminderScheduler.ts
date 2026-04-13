@@ -55,8 +55,9 @@ export async function sendDailyReminders(): Promise<void> {
   });
 
   let remindedFamilies = 0;
-  let remindedUsers = 0;
-  const tasks: Promise<unknown>[] = [];
+  const dbNotifTasks: Promise<unknown>[] = [];
+  // 푸시 발송 대상을 유저 단위로 모아 중복 방지 (다중 그룹 소속 유저에게 1회만 발송)
+  const pushTargets = new Map<string, { apnsToken: string | null; fcmToken: string | null; locale: string | null; notifQuestion: boolean }>();
 
   for (const dq of candidateDQs) {
     // 가족 멤버 전원 조회
@@ -66,7 +67,7 @@ export async function sendDailyReminders(): Promise<void> {
         userId: true,
         skippedDate: true,
         user: {
-          select: { id: true, apnsToken: true, fcmToken: true, familyId: true, locale: true },
+          select: { id: true, apnsToken: true, fcmToken: true, familyId: true, locale: true, notifQuestion: true },
         },
       },
     });
@@ -89,51 +90,68 @@ export async function sendDailyReminders(): Promise<void> {
     );
 
     if (unfinishedMemberships.length === 0) continue;
-    // 전원 완료된 케이스는 이미 위에서 걸러짐
 
     for (const m of unfinishedMemberships) {
       const user = m.user;
       if (!user || !user.familyId) continue;
       const familyIdForNotif = user.familyId;
 
-      // 수신자 locale 기준 로컬라이즈
       const msgs = getPushMessages(user.locale);
       const title = msgs.answerReminder.title;
       const body = msgs.answerReminder.body;
 
-      tasks.push(
+      // DB 알림은 그룹별로 생성 (앱 내 알림 목록에서 그룹 구분용)
+      dbNotifTasks.push(
         notificationService
           .createNotification(user.id, 'ANSWER_REQUEST', title, body, familyIdForNotif)
           .catch((e) => {
             console.warn('[Reminder] 알림 저장 실패:', e);
           })
       );
-      if (user.apnsToken) {
-        tasks.push(
-          pushService
-            .sendApnsPush(user.apnsToken, title, body, 'ANSWER_REQUEST')
-            .catch((e) => {
-              console.warn('[Reminder] APNs 푸시 실패:', e);
-            })
-        );
+
+      // 푸시 대상은 유저 단위로 1회만 수집 (중복 방지)
+      if (!pushTargets.has(user.id)) {
+        pushTargets.set(user.id, {
+          apnsToken: user.apnsToken,
+          fcmToken: user.fcmToken,
+          locale: user.locale,
+          notifQuestion: user.notifQuestion,
+        });
       }
-      if (user.fcmToken) {
-        tasks.push(
-          pushService
-            .sendFcmPush(user.fcmToken, title, body, 'ANSWER_REQUEST')
-            .catch((e) => {
-              console.warn('[Reminder] FCM 푸시 실패:', e);
-            })
-        );
-      }
-      remindedUsers++;
     }
     remindedFamilies++;
   }
 
-  await Promise.all(tasks);
+  // DB 알림 저장 (그룹별) 실행
+  await Promise.all(dbNotifTasks);
+
+  // 푸시 발송 — 유저당 1회만 (다중 그룹이어도 단일 푸시)
+  const pushTasks: Promise<unknown>[] = [];
+  for (const [, target] of pushTargets) {
+    if (!target.notifQuestion) continue;
+    const msgs = getPushMessages(target.locale);
+    const title = msgs.answerReminder.title;
+    const body = msgs.answerReminder.body;
+
+    if (target.apnsToken) {
+      pushTasks.push(
+        pushService.sendApnsPush(target.apnsToken, title, body, 'ANSWER_REQUEST').catch((e) => {
+          console.warn('[Reminder] APNs 푸시 실패:', e);
+        })
+      );
+    }
+    if (target.fcmToken) {
+      pushTasks.push(
+        pushService.sendFcmPush(target.fcmToken, title, body, 'ANSWER_REQUEST').catch((e) => {
+          console.warn('[Reminder] FCM 푸시 실패:', e);
+        })
+      );
+    }
+  }
+  await Promise.all(pushTasks);
+
   console.log(
-    `[Reminder] Sent to ${remindedUsers} users across ${remindedFamilies} families`
+    `[Reminder] Reminded ${pushTargets.size} unique users across ${remindedFamilies} families`
   );
 }
 

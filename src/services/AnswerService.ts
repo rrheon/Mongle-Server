@@ -97,7 +97,7 @@ export class AnswerService {
 
       const otherMembers = await prisma.user.findMany({
         where: { familyId: user.familyId, id: { not: user.id } },
-        select: { id: true, apnsToken: true, fcmToken: true, locale: true },
+        select: { id: true, apnsToken: true, fcmToken: true, locale: true, notifAnswer: true },
       });
 
       // Lambda에서는 fire-and-forget 패턴이 안 됨 — 핸들러가 응답하면 runtime이 frozen 처리되어
@@ -113,19 +113,22 @@ export class AnswerService {
             console.warn('[Answer] 알림 저장 실패:', e);
           })
         );
-        if (member.apnsToken) {
-          tasks.push(
-            pushService.sendApnsPush(member.apnsToken, title, body, 'MEMBER_ANSWERED').catch((e) => {
-              console.warn('[Answer] APNs 푸시 실패:', e);
-            })
-          );
-        }
-        if (member.fcmToken) {
-          tasks.push(
-            pushService.sendFcmPush(member.fcmToken, title, body, 'MEMBER_ANSWERED', senderColorId).catch((e) => {
-              console.warn('[Answer] FCM 푸시 실패:', e);
-            })
-          );
+        // 알림 선호도 체크: notifAnswer가 꺼져있으면 푸시 발송 건너뜀
+        if (member.notifAnswer) {
+          if (member.apnsToken) {
+            tasks.push(
+              pushService.sendApnsPush(member.apnsToken, title, body, 'MEMBER_ANSWERED').catch((e) => {
+                console.warn('[Answer] APNs 푸시 실패:', e);
+              })
+            );
+          }
+          if (member.fcmToken) {
+            tasks.push(
+              pushService.sendFcmPush(member.fcmToken, title, body, 'MEMBER_ANSWERED', senderColorId).catch((e) => {
+                console.warn('[Answer] FCM 푸시 실패:', e);
+              })
+            );
+          }
         }
       }
       await Promise.all(tasks);

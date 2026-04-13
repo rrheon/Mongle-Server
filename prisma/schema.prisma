@@ -31,6 +31,13 @@ model User {
   termsAcceptedAt        DateTime? @map("terms_accepted_at")
   privacyAcceptedVersion String?   @map("privacy_accepted_version")
   privacyAcceptedAt      DateTime? @map("privacy_accepted_at")
+  // 알림 선호도 — 각 타입별 ON/OFF. 기본값 true(수신)
+  notifAnswer            Boolean   @default(true)  @map("notif_answer")    // 구성원 답변 알림
+  notifNudge             Boolean   @default(true)  @map("notif_nudge")     // 재촉하기 알림
+  notifQuestion          Boolean   @default(true)  @map("notif_question")  // 새 질문 알림
+  quietHoursEnabled      Boolean   @default(true)  @map("quiet_hours_enabled")
+  quietHoursStart        String    @default("22:00") @map("quiet_hours_start")
+  quietHoursEnd          String    @default("08:00") @map("quiet_hours_end")
   // 이메일/비밀번호 로그인용 bcrypt 해시. 소셜 전용 계정이면 NULL.
   passwordHash           String?   @map("password_hash")
   answers            Answer[]

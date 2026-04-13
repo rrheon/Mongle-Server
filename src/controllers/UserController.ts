@@ -104,6 +104,38 @@ export class UserController extends Controller {
   }
 
   /**
+   * 알림 선호도 조회
+   * @summary 알림 선호도 조회
+   */
+  @Get('me/notification-preferences')
+  @Security('jwt')
+  @SuccessResponse(200, '성공')
+  public async getNotificationPreferences(@Request() req: AuthRequest) {
+    return this.userService.getNotificationPreferences(req.user.userId);
+  }
+
+  /**
+   * 알림 선호도 수정
+   * @summary 알림 선호도 수정
+   */
+  @Patch('me/notification-preferences')
+  @Security('jwt')
+  @SuccessResponse(200, '성공')
+  public async updateNotificationPreferences(
+    @Request() req: AuthRequest,
+    @Body() body: {
+      notifAnswer?: boolean;
+      notifNudge?: boolean;
+      notifQuestion?: boolean;
+      quietHoursEnabled?: boolean;
+      quietHoursStart?: string;
+      quietHoursEnd?: string;
+    }
+  ) {
+    return this.userService.updateNotificationPreferences(req.user.userId, body);
+  }
+
+  /**
    * 사용자 ID로 조회 (본인 또는 같은 가족 구성원만 가능)
    * @summary 사용자 조회
    */

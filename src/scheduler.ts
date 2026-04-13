@@ -20,6 +20,10 @@ export async function assignDailyQuestions(): Promise<void> {
   const families = await prisma.family.findMany({ select: { id: true } });
   let assigned = 0;
 
+  // 푸시 발송 대상을 유저 단위로 모아 중복 방지 (다중 그룹 소속 유저에게 1회만 발송)
+  const pushTargets = new Map<string, { apnsToken: string | null; fcmToken: string | null; locale: string | null; notifQuestion: boolean }>();
+  const dbNotifTasks: Promise<unknown>[] = [];
+
   for (const family of families) {
     const existing = await prisma.dailyQuestion.findUnique({
       where: { familyId_date: { familyId: family.id, date: today } },
@@ -41,9 +45,6 @@ export async function assignDailyQuestions(): Promise<void> {
         select: { userId: true, skippedDate: true },
       });
 
-      // 완료 판정은 이제 KST 하루 윈도우 없이 questionId 기준으로 집계.
-      // 완료 시점에 AnswerService/QuestionService 가 DQ.date 를 완료일자로 이동시키므로,
-      // recentDQ 에 매달린 답변은 recentDQ 의 lifespan 전체를 포함한다.
       const answeredUserIds = new Set(
         (await prisma.answer.findMany({
           where: {
@@ -83,42 +84,64 @@ export async function assignDailyQuestions(): Promise<void> {
     await prisma.dailyQuestion.create({ data: { questionId: selected.id, familyId: family.id, date: today } });
     assigned++;
 
-    // 가족 멤버 전원에게 새 질문 알림 발송 (수신자 locale 별 로컬라이즈)
+    // 가족 멤버 전원에게 DB 알림 저장 (그룹별 기록 유지) + 푸시 대상 수집
     const members = await prisma.user.findMany({
       where: { familyId: family.id },
-      select: { id: true, apnsToken: true, fcmToken: true, locale: true },
+      select: { id: true, apnsToken: true, fcmToken: true, locale: true, notifQuestion: true },
     });
-    // Lambda fire-and-forget 방지 — 모든 푸시/알림 작업을 await
-    const tasks: Promise<unknown>[] = [];
     for (const member of members) {
       const msgs = getPushMessages(member.locale);
       const title = msgs.newQuestion.title;
       const body = msgs.newQuestion.body;
 
-      tasks.push(
+      // DB 알림은 그룹별로 생성 (앱 내 알림 목록에서 그룹 구분용)
+      dbNotifTasks.push(
         notificationService.createNotification(member.id, 'NEW_QUESTION', title, body, family.id).catch((e) => {
           console.warn('[Scheduler] 알림 저장 실패:', e);
         })
       );
-      if (member.apnsToken) {
-        tasks.push(
-          pushService.sendApnsPush(member.apnsToken, title, body, 'NEW_QUESTION').catch((e) => {
-            console.warn('[Scheduler] APNs 푸시 실패:', e);
-          })
-        );
-      }
-      if (member.fcmToken) {
-        tasks.push(
-          pushService.sendFcmPush(member.fcmToken, title, body, 'NEW_QUESTION').catch((e) => {
-            console.warn('[Scheduler] FCM 푸시 실패:', e);
-          })
-        );
+
+      // 푸시 대상은 유저 단위로 1회만 수집 (중복 방지)
+      if (!pushTargets.has(member.id)) {
+        pushTargets.set(member.id, {
+          apnsToken: member.apnsToken,
+          fcmToken: member.fcmToken,
+          locale: member.locale,
+          notifQuestion: member.notifQuestion,
+        });
       }
     }
-    await Promise.all(tasks);
   }
 
-  console.log(`[Scheduler] Assigned daily questions to ${assigned} families`);
+  // DB 알림 저장 (그룹별) 실행
+  await Promise.all(dbNotifTasks);
+
+  // 푸시 발송 — 유저당 1회만 (다중 그룹이어도 단일 푸시)
+  const pushTasks: Promise<unknown>[] = [];
+  for (const [, target] of pushTargets) {
+    if (!target.notifQuestion) continue;
+    const msgs = getPushMessages(target.locale);
+    const title = msgs.newQuestion.title;
+    const body = msgs.newQuestion.body;
+
+    if (target.apnsToken) {
+      pushTasks.push(
+        pushService.sendApnsPush(target.apnsToken, title, body, 'NEW_QUESTION').catch((e) => {
+          console.warn('[Scheduler] APNs 푸시 실패:', e);
+        })
+      );
+    }
+    if (target.fcmToken) {
+      pushTasks.push(
+        pushService.sendFcmPush(target.fcmToken, title, body, 'NEW_QUESTION').catch((e) => {
+          console.warn('[Scheduler] FCM 푸시 실패:', e);
+        })
+      );
+    }
+  }
+  await Promise.all(pushTasks);
+
+  console.log(`[Scheduler] Assigned daily questions to ${assigned} families, pushed to ${pushTargets.size} unique users`);
 }
 
 // EventBridge Lambda 핸들러

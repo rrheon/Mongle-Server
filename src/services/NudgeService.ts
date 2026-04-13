@@ -71,27 +71,28 @@ export class NudgeService {
     );
 
     // 푸시 발송 — Lambda 환경에서는 반드시 await 해야 함.
-    // (await 없이 .catch() 만 걸면 핸들러가 응답 후 Lambda runtime이 frozen 처리되어
-    //  HTTP/2 APNs 연결이 중단되고 푸시가 실제로 전송되지 않음.)
+    // 알림 선호도 체크: notifNudge가 꺼져있으면 푸시 발송 건너뜀 (DB 알림 기록은 유지)
     const pushTasks: Promise<void>[] = [];
-    if (target.apnsToken) {
-      pushTasks.push(
-        pushService.sendApnsPush(target.apnsToken, nudgeTitle, nudgeBody, 'ANSWER_REQUEST').catch((e) => {
-          console.warn('[Nudge] APNs 푸시 실패:', e);
-        })
-      );
-    }
-    if (target.fcmToken) {
-      pushTasks.push(
-        pushService.sendFcmPush(
-          target.fcmToken,
-          nudgeTitle,
-          nudgeBody,
-          'ANSWER_REQUEST'
-        ).catch((e) => {
-          console.warn('[Nudge] FCM 푸시 실패:', e);
-        })
-      );
+    if (target.notifNudge) {
+      if (target.apnsToken) {
+        pushTasks.push(
+          pushService.sendApnsPush(target.apnsToken, nudgeTitle, nudgeBody, 'ANSWER_REQUEST').catch((e) => {
+            console.warn('[Nudge] APNs 푸시 실패:', e);
+          })
+        );
+      }
+      if (target.fcmToken) {
+        pushTasks.push(
+          pushService.sendFcmPush(
+            target.fcmToken,
+            nudgeTitle,
+            nudgeBody,
+            'ANSWER_REQUEST'
+          ).catch((e) => {
+            console.warn('[Nudge] FCM 푸시 실패:', e);
+          })
+        );
+      }
     }
     await Promise.all(pushTasks);
 
