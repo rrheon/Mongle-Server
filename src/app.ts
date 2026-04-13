@@ -250,6 +250,18 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   app.use('/auth/email/signup', socialLoginLimiter);
   app.use('/auth/email/login', socialLoginLimiter);
 
+  // 푸시 알림 인프라 상태 확인 (관리자용)
+  app.get('/admin/push-health', (_req: Request, res: Response) => {
+    const apnsReady = !!(process.env.APNS_KEY_ID && process.env.APNS_TEAM_ID && process.env.APNS_BUNDLE_ID && process.env.APNS_PRIVATE_KEY);
+    const fcmReady = !!(process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY);
+    const env = process.env.NODE_ENV === 'production' ? 'production (api.push.apple.com)' : 'sandbox (api.sandbox.push.apple.com)';
+    res.json({
+      apns: { ready: apnsReady, environment: env },
+      fcm: { ready: fcmReady },
+      timestamp: new Date().toISOString(),
+    });
+  });
+
   // API 라우트 등록 (tsoa가 생성)
   RegisterRoutes(app);
 
