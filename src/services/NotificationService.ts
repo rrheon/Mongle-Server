@@ -31,12 +31,13 @@ export class NotificationService {
   async markAsRead(authUserId: string, notificationId: string): Promise<NotificationDTO> {
     const user = await prisma.user.findUnique({ where: { userId: authUserId } });
     if (!user) throw new Error('사용자를 찾을 수 없습니다.');
+    const normalizedId = notificationId.toLowerCase();
     const item = await prisma.notification.updateMany({
-      where: { id: notificationId, userId: user.id },
+      where: { id: normalizedId, userId: user.id },
       data: { isRead: true },
     });
     if (item.count === 0) throw new Error('알림을 찾을 수 없습니다.');
-    const updated = await prisma.notification.findUniqueOrThrow({ where: { id: notificationId } });
+    const updated = await prisma.notification.findUniqueOrThrow({ where: { id: normalizedId } });
     return this.toDTO(updated);
   }
 
@@ -53,7 +54,7 @@ export class NotificationService {
   async deleteNotification(authUserId: string, notificationId: string): Promise<void> {
     const user = await prisma.user.findUnique({ where: { userId: authUserId } });
     if (!user) throw new Error('사용자를 찾을 수 없습니다.');
-    await prisma.notification.deleteMany({ where: { id: notificationId, userId: user.id } });
+    await prisma.notification.deleteMany({ where: { id: notificationId.toLowerCase(), userId: user.id } });
   }
 
   async deleteAllNotifications(authUserId: string): Promise<{ count: number }> {
