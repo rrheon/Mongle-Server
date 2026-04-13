@@ -316,6 +316,17 @@ export class AuthService {
     };
   }
 
+  /**
+   * 로그아웃 — 디바이스 푸시 토큰(APNs/FCM) 제거
+   * 동일 디바이스로 다른 계정 로그인 시 이전 계정에 푸시가 가는 문제 방지
+   */
+  async logout(userId: string): Promise<void> {
+    await prisma.user.updateMany({
+      where: { userId },
+      data: { apnsToken: null, fcmToken: null },
+    });
+  }
+
   async refreshToken(refreshToken: string): Promise<TokenRefreshResult> {
     let payload: { sub: string; email: string };
     try {

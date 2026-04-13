@@ -82,13 +82,14 @@ export class AuthController extends Controller {
   }
 
   /**
-   * 로그아웃
-   * @summary 로그아웃 (클라이언트 토큰 삭제 확인용)
+   * 로그아웃 — 디바이스 푸시 토큰(APNs/FCM) 제거 포함
+   * @summary 로그아웃 (디바이스 토큰 정리 + 클라이언트 토큰 삭제)
    */
   @Post('logout')
   @Security('jwt')
   @SuccessResponse(200, '로그아웃 성공')
-  public async logout(): Promise<{ message: string }> {
+  public async logout(@Request() req: AuthRequest): Promise<{ message: string }> {
+    await this.authService.logout(req.user.userId);
     return { message: '로그아웃 되었습니다.' };
   }
 
