@@ -7,45 +7,26 @@ import { getPushMessages } from './utils/i18n/push';
 const notificationService = new NotificationService();
 const pushService = new PushNotificationService();
 
-/**
- * KST 기준 오늘을 UTC 자정 Date 로 반환.
- */
-function getKstToday(): Date {
-  const now = new Date();
-  const kstDateStr = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
-  return new Date(kstDateStr + 'T00:00:00.000Z');
-}
-
 function isSameDate(a: Date | null | undefined, b: Date | null | undefined): boolean {
   if (!a || !b) return false;
   return a.toISOString().split('T')[0] === b.toISOString().split('T')[0];
 }
 
 /**
- * 자동 재촉 알림 발송.
+ * 자동 재촉 알림 발송 (KST 19:00 스케줄).
  *
  * 조건:
- *   - 각 가족의 "현재 활성 DailyQuestion" 중에서
- *   - 배정 이후 24시간이 지났고 (첫날 배정 직후 재촉은 부담스러우므로 제외)
+ *   - 각 가족의 "현재 활성 DailyQuestion" (가장 최근 배정분, 날짜 무관)
  *   - 아직 답변/패스하지 않은 멤버에게만
- *   - 하루 1회 푸시
+ *   - 유저당 1회 푸시 (다중 그룹 소속이어도 중복 발송 없음)
  *
  * 전원이 이미 완료된 경우는 건너뜀.
  */
 export async function sendDailyReminders(): Promise<void> {
-  const today = getKstToday();
-  const yesterday = new Date(today);
-  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-  const twoDaysAgo = new Date(today);
-  twoDaysAgo.setUTCDate(twoDaysAgo.getUTCDate() - 2);
-
-  // "배정 이후 24시간 지났지만 48시간은 안 지난" = date <= yesterday && date > twoDaysAgo
-  //   즉 date 가 어제 또는 어제 이전이지만, 스케줄러가 포기할 48h 범위 안인 DQ만 대상
-  //   (오늘 배정된 DQ 에 대해서는 첫날이라 재촉 안 함)
+  // 각 가족의 가장 최근 DailyQuestion 1건만 추출 (날짜 구분 없음)
   const candidateDQs = await prisma.dailyQuestion.findMany({
-    where: {
-      date: { gt: twoDaysAgo, lte: yesterday },
-    },
+    distinct: ['familyId'],
+    orderBy: { date: 'desc' },
     select: {
       id: true,
       questionId: true,

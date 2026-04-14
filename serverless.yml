@@ -133,14 +133,14 @@ functions:
           rate: cron(0 3 * * ? *)
           enabled: true
 
-  # 매일 저녁 자동 재촉 알림 (KST 21:00 = UTC 12:00)
-  # 배정 다음날부터 전날 질문을 아직 답/패스 안 한 멤버에게만 1회 푸시
+  # 매일 저녁 자동 재촉 알림 (KST 19:00 = UTC 10:00)
+  # 각 가족의 현재 활성 질문에 대해 아직 답/패스 안 한 멤버에게 1회 푸시 (날짜 무관)
   dailyReminderScheduler:
     handler: src/reminderScheduler.handler
     timeout: 60
     events:
       - schedule:
-          rate: cron(0 12 * * ? *)
+          rate: cron(0 10 * * ? *)
           enabled: true
 
 # 리소스 정의 (선택사항 - 별도 CloudFormation으로 관리 권장)
