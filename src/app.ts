@@ -7,6 +7,9 @@ import { RegisterRoutes } from './routes/routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { socialLoginLimiter, refreshTokenLimiter } from './middleware/rateLimiter';
 import { assignDailyQuestions } from './scheduler';
+import { sendDailyReminders } from './reminderScheduler';
+import { PushNotificationService } from './services/PushNotificationService';
+import prisma from './utils/prisma';
 
 // Express 앱 생성
 export function createApp(): Express {
@@ -262,6 +265,122 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     });
   });
 
+  // ─────────────────────────────────────────────────────────────────────
+  // 디버그 엔드포인트 (푸시/리마인더 문제 재현용)
+  //
+  // 보호: X-Debug-Secret 헤더가 DEBUG_SECRET 환경변수와 일치해야 함.
+  // DEBUG_SECRET 미설정 시 전 요청 403 (프로덕션에서 실수 노출 방지).
+  // ─────────────────────────────────────────────────────────────────────
+  const debugGuard = (req: Request, res: Response, next: () => void): void => {
+    const secret = process.env.DEBUG_SECRET;
+    if (!secret) { res.status(403).json({ error: 'DEBUG_SECRET not set' }); return; }
+    if (req.header('X-Debug-Secret') !== secret) { res.status(403).json({ error: 'invalid debug secret' }); return; }
+    next();
+  };
+
+  // 유저의 푸시 관련 상태 진단: 토큰, 알림설정 플래그, 오늘자 DQ 답변여부
+  app.get('/admin/user-push-state/:userId', debugGuard, async (req: Request, res: Response) => {
+    try {
+      const userId = req.params.userId;
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, apnsToken: true, fcmToken: true, locale: true, notifQuestion: true, familyId: true },
+      });
+      if (!user) { res.status(404).json({ error: 'user not found' }); return; }
+
+      const memberships = await prisma.familyMembership.findMany({
+        where: { userId },
+        select: { familyId: true, skippedDate: true },
+      });
+
+      const familyIds = memberships.map((m) => m.familyId);
+      const latestDQs = familyIds.length
+        ? await prisma.dailyQuestion.findMany({
+            where: { familyId: { in: familyIds } },
+            distinct: ['familyId'],
+            orderBy: { date: 'desc' },
+            select: { id: true, familyId: true, questionId: true, date: true },
+          })
+        : [];
+
+      const answered = latestDQs.length
+        ? await prisma.answer.findMany({
+            where: { userId, questionId: { in: latestDQs.map((d) => d.questionId) } },
+            select: { questionId: true },
+          })
+        : [];
+      const answeredSet = new Set(answered.map((a) => a.questionId));
+
+      res.json({
+        user: {
+          id: user.id,
+          hasApnsToken: !!user.apnsToken,
+          apnsTokenPrefix: user.apnsToken ? user.apnsToken.substring(0, 10) + '...' : null,
+          hasFcmToken: !!user.fcmToken,
+          fcmTokenPrefix: user.fcmToken ? user.fcmToken.substring(0, 10) + '...' : null,
+          locale: user.locale,
+          notifQuestion: user.notifQuestion,
+          familyId: user.familyId,
+        },
+        memberships: memberships.map((m) => ({
+          familyId: m.familyId,
+          skippedDate: m.skippedDate,
+          latestDQ: latestDQs.find((d) => d.familyId === m.familyId) ?? null,
+          answered: latestDQs.some((d) => d.familyId === m.familyId && answeredSet.has(d.questionId)),
+        })),
+        serverTimeUtc: new Date().toISOString(),
+      });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
+  // 단일 유저에게 테스트 푸시 발송 — APNs 응답을 있는 그대로 반환
+  app.post('/admin/push-test', debugGuard, async (req: Request, res: Response) => {
+    try {
+      const { userId, title, body } = (req.body ?? {}) as { userId?: string; title?: string; body?: string };
+      if (!userId) { res.status(400).json({ error: 'userId required' }); return; }
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { apnsToken: true, fcmToken: true },
+      });
+      if (!user) { res.status(404).json({ error: 'user not found' }); return; }
+
+      const pushService = new PushNotificationService();
+      const t = title ?? '[TEST] 몽글';
+      const b = body ?? '이 알림이 보이면 APNs 경로는 정상입니다';
+
+      const apnsResult = user.apnsToken
+        ? await pushService.sendApnsPushDiagnostic(user.apnsToken, t, b, 'ANSWER_REQUEST')
+        : { skipped: true, reason: 'no apnsToken' };
+
+      res.json({
+        userId,
+        hasApnsToken: !!user.apnsToken,
+        hasFcmToken: !!user.fcmToken,
+        apns: apnsResult,
+        serverNodeEnv: process.env.NODE_ENV ?? '(unset)',
+      });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
+  // 19:00 리마인더 배치 즉시 실행 (현재 시각 기준 미답변자에게 발송)
+  app.post('/admin/reminder/run', debugGuard, async (_req: Request, res: Response) => {
+    try {
+      const startedAt = Date.now();
+      await sendDailyReminders();
+      res.json({
+        ok: true,
+        elapsedMs: Date.now() - startedAt,
+        note: 'CloudWatch 로그에서 [Reminder] 태그 확인. 대상 수는 로그에 출력됨.',
+      });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
   // API 라우트 등록 (tsoa가 생성)
   RegisterRoutes(app);
 
@@ -274,19 +393,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   return app;
 }
 
-// 로컬 개발용 스케줄러: 5분마다 KST 정오 여부 체크 후 질문 배정
+// 로컬 개발용 스케줄러: 5분마다 KST 11:00 여부 체크 후 질문 배정
 function startDailyQuestionScheduler() {
   async function checkAndAssign() {
     const now = new Date();
-    // KST 정오 = UTC 03:00
-    if (now.getUTCHours() !== 3 || now.getUTCMinutes() > 5) return;
+    // KST 11:00 = UTC 02:00
+    if (now.getUTCHours() !== 2 || now.getUTCMinutes() > 5) return;
     await assignDailyQuestions().catch((err) =>
       console.error('[Scheduler] Failed to assign daily questions:', err)
     );
   }
 
   setInterval(checkAndAssign, 5 * 60 * 1000);
-  console.log('⏰ Daily question scheduler started (runs at KST noon / UTC 03:00)');
+  console.log('⏰ Daily question scheduler started (runs at KST 11:00 / UTC 02:00)');
 }
 
 // 로컬 개발 서버

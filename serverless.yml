@@ -124,13 +124,13 @@ functions:
           method: GET
           path: /docs/{proxy+}
 
-  # 매일 정오 질문 배정 스케줄러 (KST 12:00 = UTC 03:00)
+  # 매일 오전 질문 배정 스케줄러 (KST 11:00 = UTC 02:00)
   dailyQuestionScheduler:
     handler: src/scheduler.handler
     timeout: 60
     events:
       - schedule:
-          rate: cron(0 3 * * ? *)
+          rate: cron(0 2 * * ? *)
           enabled: true
 
   # 매일 저녁 자동 재촉 알림 (KST 19:00 = UTC 10:00)
