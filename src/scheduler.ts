@@ -118,7 +118,7 @@ export async function assignDailyQuestions(): Promise<void> {
 
   // 푸시 발송 — 유저당 1회만 (다중 그룹이어도 단일 푸시)
   const pushTasks: Promise<unknown>[] = [];
-  for (const [, target] of pushTargets) {
+  for (const [userId, target] of pushTargets) {
     if (!target.notifQuestion) continue;
     const msgs = getPushMessages(target.locale);
     const title = msgs.newQuestion.title;
@@ -126,7 +126,10 @@ export async function assignDailyQuestions(): Promise<void> {
 
     if (target.apnsToken) {
       pushTasks.push(
-        pushService.sendApnsPush(target.apnsToken, title, body, 'NEW_QUESTION').catch((e) => {
+        (async () => {
+          const badgeCount = await notificationService.getUnreadCount(userId);
+          await pushService.sendApnsPush(target.apnsToken!, title, body, 'NEW_QUESTION', badgeCount);
+        })().catch((e) => {
           console.warn('[Scheduler] APNs 푸시 실패:', e);
         })
       );

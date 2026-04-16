@@ -102,36 +102,48 @@ export class AnswerService {
 
       // Lambda에서는 fire-and-forget 패턴이 안 됨 — 핸들러가 응답하면 runtime이 frozen 처리되어
       // 백그라운드 HTTP/2 APNs 연결이 중단됨. 모든 푸시 작업을 await 처리.
-      const tasks: Promise<unknown>[] = [];
+
+      // 1단계: DB 알림 저장 (뱃지 카운트 조회 전에 완료해야 정확한 수치 반영)
+      const dbNotifTasks: Promise<unknown>[] = [];
       for (const member of otherMembers) {
         const msgs = getPushMessages(member.locale);
         const title = msgs.memberAnswered.title(senderNickname);
         const body = msgs.memberAnswered.body;
-
-        tasks.push(
+        dbNotifTasks.push(
           notificationService.createNotification(member.id, 'MEMBER_ANSWERED', title, body, user.familyId, senderColorId).catch((e) => {
             console.warn('[Answer] 알림 저장 실패:', e);
           })
         );
-        // 알림 선호도 체크: notifAnswer가 꺼져있으면 푸시 발송 건너뜀
-        if (member.notifAnswer) {
-          if (member.apnsToken) {
-            tasks.push(
-              pushService.sendApnsPush(member.apnsToken, title, body, 'MEMBER_ANSWERED').catch((e) => {
-                console.warn('[Answer] APNs 푸시 실패:', e);
-              })
-            );
-          }
-          if (member.fcmToken) {
-            tasks.push(
-              pushService.sendFcmPush(member.fcmToken, title, body, 'MEMBER_ANSWERED', senderColorId).catch((e) => {
-                console.warn('[Answer] FCM 푸시 실패:', e);
-              })
-            );
-          }
+      }
+      await Promise.all(dbNotifTasks);
+
+      // 2단계: 푸시 발송 (DB 알림 반영된 뱃지 카운트 사용)
+      const pushTasks: Promise<unknown>[] = [];
+      for (const member of otherMembers) {
+        if (!member.notifAnswer) continue;
+        const msgs = getPushMessages(member.locale);
+        const title = msgs.memberAnswered.title(senderNickname);
+        const body = msgs.memberAnswered.body;
+
+        if (member.apnsToken) {
+          pushTasks.push(
+            (async () => {
+              const badgeCount = await notificationService.getUnreadCount(member.id);
+              await pushService.sendApnsPush(member.apnsToken!, title, body, 'MEMBER_ANSWERED', badgeCount);
+            })().catch((e) => {
+              console.warn('[Answer] APNs 푸시 실패:', e);
+            })
+          );
+        }
+        if (member.fcmToken) {
+          pushTasks.push(
+            pushService.sendFcmPush(member.fcmToken, title, body, 'MEMBER_ANSWERED', senderColorId).catch((e) => {
+              console.warn('[Answer] FCM 푸시 실패:', e);
+            })
+          );
         }
       }
-      await Promise.all(tasks);
+      await Promise.all(pushTasks);
 
       // 그룹 전원이 이번 답변으로 완료되었다면 DailyQuestion.date 를 오늘(KST)로 이동
       // → history 상 "완료일자" 기준으로 기록되도록

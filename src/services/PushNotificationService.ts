@@ -76,19 +76,89 @@ export class PushNotificationService {
   }
 
   /** APNs 푸시 알림 범용 발송 */
-  async sendApnsPush(deviceToken: string, title: string, body: string, type: string): Promise<void> {
+  async sendApnsPush(deviceToken: string, title: string, body: string, type: string, badgeCount?: number): Promise<void> {
     if (!this.keyId || !this.teamId || !this.bundleId || !this.rawKey) return;
     const payload = JSON.stringify({
-      aps: { alert: { title, body }, sound: 'default', badge: 1 },
+      aps: { alert: { title, body }, sound: 'default', badge: badgeCount ?? 1 },
       type,
     });
     return this._sendApnsPayload(deviceToken, payload);
   }
 
-  /** 재촉하기 푸시 알림 발송 */
-  async sendNudgePush(deviceToken: string, senderName: string): Promise<void> {
+  /**
+   * APNs 푸시 진단용 발송 — 에러를 삼키지 않고 응답 상세를 그대로 반환한다.
+   * (디버그 엔드포인트 전용. 프로덕션 알림 경로는 sendApnsPush 사용)
+   *
+   * 반환:
+   *   - ok: true/false (200 OK 여부)
+   *   - status: HTTP status code
+   *   - body: APNs 응답 바디 (실패 사유 문자열)
+   *   - host: 실제로 접속한 APNs 호스트 (sandbox vs production 확인용)
+   *   - isProduction: 서버가 스스로 production으로 판단했는지
+   *   - skipped: 환경변수 미설정으로 발송 자체를 못한 경우
+   */
+  async sendApnsPushDiagnostic(deviceToken: string, title: string, body: string, type: string): Promise<{
+    ok: boolean;
+    status?: number;
+    body?: string;
+    host?: string;
+    isProduction: boolean;
+    skipped?: boolean;
+    error?: string;
+  }> {
+    if (!this.keyId || !this.teamId || !this.bundleId || !this.rawKey) {
+      return { ok: false, isProduction: this.isProduction, skipped: true, error: 'APNs env vars not set' };
+    }
     const payload = JSON.stringify({
-      aps: { alert: { title: '재촉하기 알림', body: `${senderName}님이 오늘의 질문에 답변해달라고 합니다` }, sound: 'default', badge: 1 },
+      aps: { alert: { title, body }, sound: 'default', badge: 1 },
+      type,
+    });
+    const host = this.isProduction ? 'api.push.apple.com' : 'api.sandbox.push.apple.com';
+    return new Promise((resolve) => {
+      try {
+        const client = http2.connect(`https://${host}`, { rejectUnauthorized: true });
+        client.on('error', (e) => {
+          client.destroy();
+          resolve({ ok: false, host, isProduction: this.isProduction, error: `connect error: ${String(e)}` });
+        });
+        const headers: http2.OutgoingHttpHeaders = {
+          ':method': 'POST',
+          ':path': `/3/device/${deviceToken}`,
+          'authorization': `bearer ${this.makeJwt()}`,
+          'apns-topic': this.bundleId,
+          'apns-push-type': 'alert',
+          'apns-expiration': '0',
+          'apns-priority': '10',
+          'content-type': 'application/json',
+          'content-length': String(Buffer.byteLength(payload)),
+        };
+        const req = client.request(headers);
+        let respBody = '';
+        let status: number | undefined;
+        req.on('response', (resHeaders) => {
+          status = Number(resHeaders[':status']);
+        });
+        req.on('data', (chunk: Buffer) => { respBody += chunk.toString(); });
+        req.on('end', () => {
+          client.close();
+          resolve({ ok: status === 200, status, body: respBody, host, isProduction: this.isProduction });
+        });
+        req.on('error', (e) => {
+          client.destroy();
+          resolve({ ok: false, status, body: respBody, host, isProduction: this.isProduction, error: `request error: ${String(e)}` });
+        });
+        req.write(payload);
+        req.end();
+      } catch (e) {
+        resolve({ ok: false, host, isProduction: this.isProduction, error: `exception: ${String(e)}` });
+      }
+    });
+  }
+
+  /** 재촉하기 푸시 알림 발송 */
+  async sendNudgePush(deviceToken: string, senderName: string, badgeCount?: number): Promise<void> {
+    const payload = JSON.stringify({
+      aps: { alert: { title: '재촉하기 알림', body: `${senderName}님이 오늘의 질문에 답변해달라고 합니다` }, sound: 'default', badge: badgeCount ?? 1 },
       type: 'ANSWER_REQUEST',
     });
     return this._sendApnsPayload(deviceToken, payload);

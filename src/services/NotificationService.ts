@@ -76,6 +76,11 @@ export class NotificationService {
     await prisma.notification.create({ data: { userId, type, title, body, familyId: familyId ?? null, colorId: colorId ?? null } });
   }
 
+  /** 유저의 미읽음 알림 수 (뱃지 카운트용) */
+  async getUnreadCount(userId: string): Promise<number> {
+    return prisma.notification.count({ where: { userId, isRead: false } });
+  }
+
   private toDTO(n: { id: string; userId: string; familyId: string | null; colorId?: string | null; type: NotificationType; title: string; body: string; isRead: boolean; createdAt: Date }): NotificationDTO {
     return {
       id: n.id,
