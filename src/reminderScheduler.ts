@@ -74,8 +74,9 @@ export async function sendDailyReminders(): Promise<void> {
 
     for (const m of unfinishedMemberships) {
       const user = m.user;
-      if (!user || !user.familyId) continue;
-      const familyIdForNotif = user.familyId;
+      if (!user) continue;
+      // 해당 질문이 속한 가족 그룹 ID를 사용 (user.familyId 는 기본 그룹이라 다를 수 있음)
+      const familyIdForNotif = dq.familyId;
 
       const msgs = getPushMessages(user.locale);
       const title = msgs.answerReminder.title;
@@ -108,7 +109,7 @@ export async function sendDailyReminders(): Promise<void> {
 
   // 푸시 발송 — 유저당 1회만 (다중 그룹이어도 단일 푸시)
   const pushTasks: Promise<unknown>[] = [];
-  for (const [, target] of pushTargets) {
+  for (const [userId, target] of pushTargets) {
     if (!target.notifQuestion) continue;
     const msgs = getPushMessages(target.locale);
     const title = msgs.answerReminder.title;
@@ -116,7 +117,10 @@ export async function sendDailyReminders(): Promise<void> {
 
     if (target.apnsToken) {
       pushTasks.push(
-        pushService.sendApnsPush(target.apnsToken, title, body, 'ANSWER_REQUEST').catch((e) => {
+        (async () => {
+          const badgeCount = await notificationService.getUnreadCount(userId);
+          await pushService.sendApnsPush(target.apnsToken!, title, body, 'ANSWER_REQUEST', badgeCount);
+        })().catch((e) => {
           console.warn('[Reminder] APNs 푸시 실패:', e);
         })
       );
