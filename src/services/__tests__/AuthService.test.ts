@@ -71,6 +71,7 @@ describe('AuthService.refreshToken', () => {
     mockVerifyRefreshToken.mockReturnValue({ sub: 'deleted-user', email: 'gone@test.com' });
     mockUserFindUnique.mockResolvedValue(null);
 
-    await expect(service.refreshToken('orphan-token')).rejects.toThrow('사용자를 찾을 수 없습니다.');
+    // ApiError 가 조사 처리(을/를)를 자동 변형하므로 정확 일치 대신 핵심 토큰으로 검증
+    await expect(service.refreshToken('orphan-token')).rejects.toThrow(/사용자.+찾을 수 없습니다/);
   });
 });

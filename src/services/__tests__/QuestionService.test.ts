@@ -7,6 +7,7 @@ const mockPrismaQuestionFindUnique = jest.fn();
 const mockPrismaQuestionFindMany = jest.fn();
 const mockPrismaQuestionCreate = jest.fn();
 const mockPrismaDailyQuestionFindUnique = jest.fn();
+const mockPrismaDailyQuestionFindFirst = jest.fn();
 const mockPrismaDailyQuestionFindMany = jest.fn();
 const mockPrismaDailyQuestionCreate = jest.fn();
 const mockPrismaDailyQuestionUpdate = jest.fn();
@@ -36,6 +37,7 @@ jest.mock('../../utils/prisma', () => ({
     },
     dailyQuestion: {
       findUnique: mockPrismaDailyQuestionFindUnique,
+      findFirst: mockPrismaDailyQuestionFindFirst,
       findMany: mockPrismaDailyQuestionFindMany,
       create: mockPrismaDailyQuestionCreate,
       update: mockPrismaDailyQuestionUpdate,
@@ -64,6 +66,9 @@ const mockMembership = {
   familyId: 'family-id',
   hearts: 5,
   skippedDate: null,
+  nickname: null as string | null,
+  colorId: 'loved',
+  user: { name: '테스트', moodId: null },
 };
 
 const mockQuestion = {
@@ -108,7 +113,7 @@ describe('QuestionService.getTodayQuestion', () => {
 
   it('가족에 속하지 않은 유저는 에러를 던진다', async () => {
     mockPrismaUserFindUnique.mockResolvedValue({ ...mockUser, familyId: null });
-    await expect(service.getTodayQuestion('kakao:123')).rejects.toThrow('가족에 속해 있지 않습니다.');
+    await expect(service.getTodayQuestion('kakao:123')).rejects.toThrow('그룹에 속해 있지 않습니다.');
   });
 
   it('오늘 질문이 이미 있으면 새로 배정하지 않는다', async () => {
@@ -142,7 +147,7 @@ describe('QuestionService.skipTodayQuestion', () => {
 
   it('가족에 속하지 않은 유저는 에러를 던진다', async () => {
     mockPrismaUserFindUnique.mockResolvedValue({ ...mockUser, familyId: null });
-    await expect(service.skipTodayQuestion('kakao:123')).rejects.toThrow('가족에 속해 있지 않습니다.');
+    await expect(service.skipTodayQuestion('kakao:123')).rejects.toThrow('그룹에 속해 있지 않습니다.');
   });
 
   it('멤버십이 없으면 에러를 던진다', async () => {
@@ -153,19 +158,21 @@ describe('QuestionService.skipTodayQuestion', () => {
 
   it('하트가 부족하면 에러를 던진다', async () => {
     mockPrismaUserFindUnique.mockResolvedValue(mockUser);
+    mockPrismaDailyQuestionFindUnique.mockResolvedValue(mockDailyQuestion); // 오늘 질문 존재
     mockPrismaFamilyMembershipFindUnique.mockResolvedValue({ ...mockMembership, hearts: 2 });
     await expect(service.skipTodayQuestion('kakao:123')).rejects.toThrow('하트가 부족합니다');
   });
 
-  it('이미 오늘 패스한 경우 에러를 던진다', async () => {
+  it('이미 해당 질문을 패스한 경우 에러를 던진다', async () => {
     mockPrismaUserFindUnique.mockResolvedValue(mockUser);
-    const today = new Date(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' }) + 'T00:00:00.000Z');
+    const questionDate = mockDailyQuestion.date;
+    mockPrismaDailyQuestionFindUnique.mockResolvedValue(mockDailyQuestion);
     mockPrismaFamilyMembershipFindUnique.mockResolvedValue({
       ...mockMembership,
       hearts: 5,
-      skippedDate: today,
+      skippedDate: questionDate, // 이미 같은 날짜에 패스
     });
-    await expect(service.skipTodayQuestion('kakao:123')).rejects.toThrow('오늘 이미 질문을 패스했습니다');
+    await expect(service.skipTodayQuestion('kakao:123')).rejects.toThrow('이미 질문을 패스했습니다');
   });
 
   it('이미 답변한 경우 패스할 수 없다', async () => {
@@ -230,7 +237,7 @@ describe('QuestionService.createCustomQuestion', () => {
     mockPrismaFamilyMembershipFindMany.mockResolvedValue([{ userId: 'db-user-id' }]);
     mockPrismaAnswerCount.mockResolvedValue(1); // 이미 답변 있음
 
-    await expect(service.createCustomQuestion('kakao:123', '새 질문')).rejects.toThrow('이미 가족 중 누군가가 답변했습니다.');
+    await expect(service.createCustomQuestion('kakao:123', '새 질문')).rejects.toThrow('이미 그룹 멤버 중 누군가가 답변했습니다.');
   });
 
   it('빈 내용은 에러를 던진다', async () => {
@@ -282,5 +289,7 @@ describe('QuestionService.createCustomQuestion', () => {
 function setupToDailyQuestionResponseMocks() {
   mockPrismaUserFindMany.mockResolvedValue([{ id: 'db-user-id' }]);
   mockPrismaFamilyMembershipFindUnique.mockResolvedValue(mockMembership);
+  // toDailyQuestionResponse 에서 findMany 로 멤버 전원을 select user.name 까지 포함하여 조회
+  mockPrismaFamilyMembershipFindMany.mockResolvedValue([mockMembership]);
   mockPrismaAnswerFindMany.mockResolvedValue([]);
 }
