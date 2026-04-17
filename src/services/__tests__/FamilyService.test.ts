@@ -184,9 +184,9 @@ describe('FamilyService.leaveFamily', () => {
     await expect(service.leaveFamily('unknown')).rejects.toThrow();
   });
 
-  it('가족에 속해 있지 않으면 에러를 던진다', async () => {
+  it('그룹에 속해 있지 않으면 에러를 던진다', async () => {
     mockPrismaUserFindUnique.mockResolvedValue({ ...mockUser, familyId: null });
-    await expect(service.leaveFamily('kakao:123')).rejects.toThrow('가족에 속해 있지 않습니다.');
+    await expect(service.leaveFamily('kakao:123')).rejects.toThrow('그룹에 속해 있지 않습니다.');
   });
 
   it('방장이고 다른 멤버가 있으면 에러를 던진다', async () => {
@@ -197,7 +197,7 @@ describe('FamilyService.leaveFamily', () => {
     mockPrismaFamilyFindUnique.mockResolvedValue({ ...mockFamily, createdById: 'db-user-id' });
     mockPrismaFamilyMembershipCount.mockResolvedValue(2); // 2명
 
-    await expect(service.leaveFamily('kakao:123')).rejects.toThrow('가족 생성자는 가족을 떠날 수 없습니다.');
+    await expect(service.leaveFamily('kakao:123')).rejects.toThrow('그룹 생성자는 그룹을 떠날 수 없습니다.');
   });
 
   it('방장이고 혼자이면 가족이 삭제된다', async () => {

@@ -1,18 +1,30 @@
+// ---- Prisma mock ----
 const mockPrismaUserFindUnique = jest.fn();
+const mockPrismaUserFindMany = jest.fn();
 const mockPrismaQuestionFindUnique = jest.fn();
 const mockPrismaAnswerFindUnique = jest.fn();
 const mockPrismaAnswerCreate = jest.fn();
 const mockPrismaAnswerFindMany = jest.fn();
 const mockPrismaAnswerUpdate = jest.fn();
 const mockPrismaAnswerDelete = jest.fn();
+const mockPrismaFamilyMembershipFindUnique = jest.fn();
 const mockPrismaFamilyMembershipFindMany = jest.fn();
 const mockPrismaFamilyMembershipUpdateMany = jest.fn();
+const mockPrismaDailyQuestionFindFirst = jest.fn();
+// $transaction 은 ops 배열을 받아 각각을 await 하는 형태, 또는 콜백 형태를 둘 다 지원한다.
+const mockPrismaTransaction = jest.fn().mockImplementation(async (arg: unknown) => {
+  if (Array.isArray(arg)) return Promise.all(arg as Promise<unknown>[]);
+  if (typeof arg === 'function') return (arg as (tx: unknown) => Promise<unknown>)({});
+  return arg;
+});
 
 jest.mock('../../utils/prisma', () => ({
   __esModule: true,
   default: {
+    $transaction: mockPrismaTransaction,
     user: {
       findUnique: mockPrismaUserFindUnique,
+      findMany: mockPrismaUserFindMany,
     },
     question: {
       findUnique: mockPrismaQuestionFindUnique,
@@ -25,10 +37,37 @@ jest.mock('../../utils/prisma', () => ({
       delete: mockPrismaAnswerDelete,
     },
     familyMembership: {
+      findUnique: mockPrismaFamilyMembershipFindUnique,
       findMany: mockPrismaFamilyMembershipFindMany,
       updateMany: mockPrismaFamilyMembershipUpdateMany,
     },
+    dailyQuestion: {
+      findFirst: mockPrismaDailyQuestionFindFirst,
+    },
   },
+}));
+
+// ---- 외부 서비스 / helper mock ----
+const mockCreateNotification = jest.fn().mockResolvedValue(undefined);
+const mockGetUnreadCount = jest.fn().mockResolvedValue(0);
+jest.mock('../NotificationService', () => ({
+  NotificationService: jest.fn().mockImplementation(() => ({
+    createNotification: mockCreateNotification,
+    getUnreadCount: mockGetUnreadCount,
+  })),
+}));
+
+const mockSendApnsPush = jest.fn().mockResolvedValue(undefined);
+const mockSendFcmPush = jest.fn().mockResolvedValue(undefined);
+jest.mock('../PushNotificationService', () => ({
+  PushNotificationService: jest.fn().mockImplementation(() => ({
+    sendApnsPush: mockSendApnsPush,
+    sendFcmPush: mockSendFcmPush,
+  })),
+}));
+
+jest.mock('../dailyQuestionCompletion', () => ({
+  tryFinalizeDailyQuestion: jest.fn().mockResolvedValue(undefined),
 }));
 
 import { AnswerService } from '../AnswerService';
@@ -77,6 +116,13 @@ const mockAnswerWithUser = {
   },
 };
 
+// createAnswer 가 성공 경로로 흘러갈 때 필요한 후속 호출들을 미리 세팅
+function setupCreateAnswerSuccessPath() {
+  mockPrismaDailyQuestionFindFirst.mockResolvedValue({ id: 'daily-q-id' });
+  mockPrismaFamilyMembershipFindUnique.mockResolvedValue({ nickname: null, colorId: 'loved' });
+  mockPrismaUserFindMany.mockResolvedValue([]); // 다른 가족 멤버 없음 → 알림/푸시 루프 생략
+}
+
 describe('AnswerService.createAnswer', () => {
   it('존재하지 않는 유저는 에러를 던진다', async () => {
     mockPrismaUserFindUnique.mockResolvedValue(null);
@@ -96,6 +142,7 @@ describe('AnswerService.createAnswer', () => {
   it('이미 답변한 질문에 다시 답변하면 에러를 던진다', async () => {
     mockPrismaUserFindUnique.mockResolvedValue(mockUser);
     mockPrismaQuestionFindUnique.mockResolvedValue(mockQuestion);
+    mockPrismaDailyQuestionFindFirst.mockResolvedValue({ id: 'daily-q-id' });
     mockPrismaAnswerFindUnique.mockResolvedValue(mockAnswerWithUser); // 이미 답변 존재
 
     await expect(
@@ -106,15 +153,16 @@ describe('AnswerService.createAnswer', () => {
   it('답변 성공 시 하트가 +1 증가한다', async () => {
     mockPrismaUserFindUnique.mockResolvedValue(mockUser);
     mockPrismaQuestionFindUnique.mockResolvedValue(mockQuestion);
-    mockPrismaAnswerFindUnique.mockResolvedValue(null); // 미답변
+    mockPrismaAnswerFindUnique.mockResolvedValue(null);
     mockPrismaAnswerCreate.mockResolvedValue(mockAnswerWithUser);
     mockPrismaFamilyMembershipUpdateMany.mockResolvedValue({ count: 1 });
+    setupCreateAnswerSuccessPath();
 
     await service.createAnswer('kakao:123', { questionId: 'question-id', content: '답변' });
 
     expect(mockPrismaFamilyMembershipUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { hearts: { increment: 1 } },
+        data: expect.objectContaining({ hearts: { increment: 1 } }),
       })
     );
   });
@@ -137,6 +185,7 @@ describe('AnswerService.createAnswer', () => {
     mockPrismaAnswerFindUnique.mockResolvedValue(null);
     mockPrismaAnswerCreate.mockResolvedValue(mockAnswerWithUser);
     mockPrismaFamilyMembershipUpdateMany.mockResolvedValue({ count: 1 });
+    setupCreateAnswerSuccessPath();
 
     await service.createAnswer('kakao:123', { questionId: 'QUESTION-ID-UPPER', content: '답변' });
 
@@ -189,7 +238,7 @@ describe('AnswerService.getFamilyAnswers', () => {
   it('가족 멤버들의 답변 목록을 반환한다', async () => {
     mockPrismaUserFindUnique.mockResolvedValue(mockUser);
     mockPrismaFamilyMembershipFindMany.mockResolvedValue([
-      { userId: 'db-user-id', nickname: '아빠', user: { name: '테스트' } },
+      { userId: 'db-user-id', nickname: '아빠', colorId: 'calm', user: { name: '테스트', moodId: null } },
     ]);
     mockPrismaAnswerFindMany.mockResolvedValue([mockAnswerWithUser]);
 
@@ -202,7 +251,7 @@ describe('AnswerService.getFamilyAnswers', () => {
   it('닉네임이 있으면 이름 대신 닉네임을 사용한다', async () => {
     mockPrismaUserFindUnique.mockResolvedValue(mockUser);
     mockPrismaFamilyMembershipFindMany.mockResolvedValue([
-      { userId: 'db-user-id', nickname: '우리아빠', user: { name: '테스트' } },
+      { userId: 'db-user-id', nickname: '우리아빠', colorId: 'calm', user: { name: '테스트', moodId: null } },
     ]);
     mockPrismaAnswerFindMany.mockResolvedValue([mockAnswerWithUser]);
 
