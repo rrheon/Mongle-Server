@@ -16,16 +16,23 @@ function isSameDate(a: Date | null | undefined, b: Date | null | undefined): boo
  * 자동 재촉 알림 발송 (KST 19:00 스케줄).
  *
  * 조건:
- *   - 각 가족의 "현재 활성 DailyQuestion" (가장 최근 배정분, 날짜 무관)
+ *   - 최근 REMINDER_WINDOW_DAYS 이내 배정된 모든 DailyQuestion
  *   - 아직 답변/패스하지 않은 멤버에게만
- *   - 유저당 1회 푸시 (다중 그룹 소속이어도 중복 발송 없음)
+ *   - 유저당 1회 푸시 (다중 그룹 소속, 다건 미답변이어도 중복 발송 없음)
+ *   - DB 알림은 (유저, 가족) 단위 1건으로 제한하여 과도한 알림 방지
  *
  * 전원이 이미 완료된 경우는 건너뜀.
  */
+const REMINDER_WINDOW_DAYS = 7;
+
 export async function sendDailyReminders(): Promise<void> {
-  // 각 가족의 가장 최근 DailyQuestion 1건만 추출 (날짜 구분 없음)
+  const windowStart = new Date();
+  windowStart.setUTCDate(windowStart.getUTCDate() - REMINDER_WINDOW_DAYS);
+
+  // 최근 7일 이내의 모든 DailyQuestion (가족별 여러 건 가능)
+  // distinct 제거: 과거 날짜 미답변 건도 리마인더 대상에 포함
   const candidateDQs = await prisma.dailyQuestion.findMany({
-    distinct: ['familyId'],
+    where: { date: { gte: windowStart } },
     orderBy: { date: 'desc' },
     select: {
       id: true,
@@ -35,10 +42,13 @@ export async function sendDailyReminders(): Promise<void> {
     },
   });
 
-  let remindedFamilies = 0;
   const dbNotifTasks: Promise<unknown>[] = [];
+  // (유저, 가족) 단위로 DB 알림 1건만 생성 — 같은 그룹에 미답변 여러 건이어도 1건
+  const dbNotifKeys = new Set<string>();
   // 푸시 발송 대상을 유저 단위로 모아 중복 방지 (다중 그룹 소속 유저에게 1회만 발송)
   const pushTargets = new Map<string, { apnsToken: string | null; fcmToken: string | null; locale: string | null; notifQuestion: boolean }>();
+  // 실제로 리마인더가 발송된 가족 ID Set
+  const remindedFamilyIds = new Set<string>();
 
   for (const dq of candidateDQs) {
     // 가족 멤버 전원 조회
@@ -82,14 +92,18 @@ export async function sendDailyReminders(): Promise<void> {
       const title = msgs.answerReminder.title;
       const body = msgs.answerReminder.body;
 
-      // DB 알림은 그룹별로 생성 (앱 내 알림 목록에서 그룹 구분용)
-      dbNotifTasks.push(
-        notificationService
-          .createNotification(user.id, 'ANSWER_REQUEST', title, body, familyIdForNotif)
-          .catch((e) => {
-            console.warn('[Reminder] 알림 저장 실패:', e);
-          })
-      );
+      // DB 알림은 (유저, 가족) 단위 1건만 — 같은 그룹 내 미답변 여러 건이어도 1건으로 취합
+      const dbKey = `${user.id}:${familyIdForNotif}`;
+      if (!dbNotifKeys.has(dbKey)) {
+        dbNotifKeys.add(dbKey);
+        dbNotifTasks.push(
+          notificationService
+            .createNotification(user.id, 'ANSWER_REQUEST', title, body, familyIdForNotif)
+            .catch((e) => {
+              console.warn('[Reminder] 알림 저장 실패:', e);
+            })
+        );
+      }
 
       // 푸시 대상은 유저 단위로 1회만 수집 (중복 방지)
       if (!pushTargets.has(user.id)) {
@@ -101,7 +115,7 @@ export async function sendDailyReminders(): Promise<void> {
         });
       }
     }
-    remindedFamilies++;
+    remindedFamilyIds.add(dq.familyId);
   }
 
   // DB 알림 저장 (그룹별) 실행
@@ -136,7 +150,7 @@ export async function sendDailyReminders(): Promise<void> {
   await Promise.all(pushTasks);
 
   console.log(
-    `[Reminder] Reminded ${pushTargets.size} unique users across ${remindedFamilies} families`
+    `[Reminder] Reminded ${pushTargets.size} unique users across ${remindedFamilyIds.size} families`
   );
 }
 
