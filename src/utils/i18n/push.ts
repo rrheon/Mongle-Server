@@ -19,7 +19,7 @@ const DEFAULT_LOCALE: Locale = 'ko';
 interface PushMessages {
   newQuestion: { title: string; body: string };
   memberAnswered: { title: (senderName: string) => string; body: string };
-  answerReminder: { title: string; body: string };
+  answerReminder: { title: string; body: string; bodyMulti: (count: number) => string };
   nudge: { title: string; body: (senderName: string) => string };
 }
 
@@ -36,6 +36,7 @@ const messagesByLocale: Record<Locale, PushMessages> = {
     answerReminder: {
       title: '오늘의 질문, 아직 답변 전이에요',
       body: '그룹 멤버들이 오늘의 질문을 기다리고 있어요. 한마디 남겨볼까요?',
+      bodyMulti: (count) => `${count}건의 미답변 질문이 있어요. 지금 확인해볼까요?`,
     },
     nudge: {
       title: '재촉하기 알림',
@@ -54,6 +55,7 @@ const messagesByLocale: Record<Locale, PushMessages> = {
     answerReminder: {
       title: "Today's question is waiting",
       body: 'Your group is waiting for your answer. Leave a note!',
+      bodyMulti: (count) => `You have ${count} unanswered questions. Take a look now!`,
     },
     nudge: {
       title: 'A gentle nudge',
@@ -72,6 +74,7 @@ const messagesByLocale: Record<Locale, PushMessages> = {
     answerReminder: {
       title: 'まだ回答していない質問があります',
       body: 'グループのメンバーがあなたの回答を待っています。一言どうですか？',
+      bodyMulti: (count) => `${count}件の未回答の質問があります。今確認してみませんか？`,
     },
     nudge: {
       title: 'リマインドが届きました',
