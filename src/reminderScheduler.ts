@@ -8,6 +8,7 @@ const notificationService = new NotificationService();
 const pushService = new PushNotificationService();
 
 export const REMINDER_WINDOW_DAYS = 7;
+export const ANSWERER_NUDGE_WINDOW_DAYS = 4;
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -56,6 +57,11 @@ export async function sendDailyReminders(): Promise<void> {
     return;
   }
 
+  // 답변자 재촉(answerer nudge) 윈도우는 미답변 재촉보다 짧음 (기본 4일 = 오늘+과거 3일)
+  const answererNudgeWindowStart = new Date(
+    kstMidnight.getTime() - ANSWERER_NUDGE_WINDOW_DAYS * DAY_MS
+  );
+
   // 배치 조회 ①: 해당 가족들의 멤버십 일괄 조회 (N+1 제거)
   const familyIds = Array.from(new Set(candidateDQs.map((dq) => dq.familyId)));
   const allMemberships = await prisma.familyMembership.findMany({
@@ -71,6 +77,7 @@ export async function sendDailyReminders(): Promise<void> {
           fcmToken: true,
           locale: true,
           notifQuestion: true,
+          notifAnswererNudge: true,
         },
       },
     },
@@ -191,6 +198,127 @@ export async function sendDailyReminders(): Promise<void> {
 
   console.log(
     `[Reminder] Reminded ${userInfoMap.size} unique users across ${remindedFamilyIds.size} families`
+  );
+
+  // ────────────────────────────────────────────────────────────
+  // MG-12: 답변자 재촉(answerer nudge)
+  //   - 본인은 답변 완료 + 같은 가족 중 최소 1명 미답변
+  //   - 4일 윈도우(오늘+과거 3일). 미답변 재촉(7일)보다 짧게 → 알림 피로 감소
+  //   - 푸시는 유저당 1회, DB 알림은 (유저, 가족) 단위
+  // ────────────────────────────────────────────────────────────
+
+  // 답변자별 집계: 몇 개 질문에서 가족 미답변 상태로 남았는지(questionCount), 총 몇 명 대기 중(pendingMembers)
+  const answererQuestionCount = new Map<string, number>();
+  const answererPendingCount = new Map<string, number>();
+  const answererUserMap = new Map<string, MembershipUser>();
+  const answererDbKeys = new Set<string>(); // `${userId}:${familyId}`
+  const answererNudgedFamilyIds = new Set<string>();
+
+  for (const dq of candidateDQs) {
+    if (dq.date < answererNudgeWindowStart) continue; // 4일 윈도우 밖 제외
+
+    const memberships = membershipsByFamily.get(dq.familyId);
+    if (!memberships || memberships.length < 2) continue; // 1인 가족 스킵
+
+    const answeredSet = answeredByQuestion.get(dq.questionId);
+    if (!answeredSet || answeredSet.size === 0) continue;
+
+    // 해당 질문 기준 미답변(그리고 skip 아님) 멤버 수
+    const pending = memberships.filter(
+      (m) => !(answeredSet.has(m.userId)) && !isSameDate(m.skippedDate, dq.date)
+    );
+    if (pending.length === 0) continue; // 전원 답변/스킵 → 재촉 불필요
+
+    // 이 질문에 답변한 멤버 = 답변자 후보
+    for (const m of memberships) {
+      if (!answeredSet.has(m.userId)) continue;
+      const user = m.user;
+      if (!user) continue;
+      answererQuestionCount.set(
+        m.userId,
+        (answererQuestionCount.get(m.userId) ?? 0) + 1
+      );
+      // pendingCount 는 가장 많았던 질문 기준(대표값) — 단일 질문 시 이 값이 본문 표시됨
+      const prevPending = answererPendingCount.get(m.userId) ?? 0;
+      if (pending.length > prevPending) answererPendingCount.set(m.userId, pending.length);
+      if (!answererUserMap.has(m.userId)) answererUserMap.set(m.userId, user);
+      answererDbKeys.add(`${m.userId}:${dq.familyId}`);
+    }
+    answererNudgedFamilyIds.add(dq.familyId);
+  }
+
+  function makeAnswererBody(
+    locale: string | null,
+    questionCount: number,
+    pendingCount: number
+  ): { title: string; body: string } {
+    const msgs = getPushMessages(locale);
+    return {
+      title: msgs.answererNudge.title,
+      body:
+        questionCount > 1
+          ? msgs.answererNudge.bodyMulti(questionCount)
+          : msgs.answererNudge.body(pendingCount),
+    };
+  }
+
+  // DB 알림
+  const answererDbTasks: Promise<unknown>[] = [];
+  for (const key of answererDbKeys) {
+    const [userId, familyIdForNotif] = key.split(':');
+    const user = answererUserMap.get(userId);
+    if (!user) continue;
+    const questionCount = answererQuestionCount.get(userId) ?? 1;
+    const pendingCount = answererPendingCount.get(userId) ?? 1;
+    const { title, body } = makeAnswererBody(user.locale, questionCount, pendingCount);
+    answererDbTasks.push(
+      notificationService
+        .createNotification(userId, 'ANSWERER_NUDGE', title, body, familyIdForNotif)
+        .catch((e) => {
+          console.warn('[AnswererNudge] 알림 저장 실패:', e);
+        })
+    );
+  }
+  await Promise.all(answererDbTasks);
+
+  // 푸시 — 유저당 1회
+  const answererPushTasks: Promise<unknown>[] = [];
+  for (const [userId, user] of answererUserMap) {
+    if (!user.notifAnswererNudge) continue;
+    const questionCount = answererQuestionCount.get(userId) ?? 1;
+    const pendingCount = answererPendingCount.get(userId) ?? 1;
+    const { title, body } = makeAnswererBody(user.locale, questionCount, pendingCount);
+
+    if (user.apnsToken) {
+      answererPushTasks.push(
+        (async () => {
+          const badgeCount = await notificationService.getUnreadCount(userId);
+          await pushService.sendApnsPush(
+            user.apnsToken!,
+            title,
+            body,
+            'ANSWERER_NUDGE',
+            badgeCount
+          );
+        })().catch((e) => {
+          console.warn('[AnswererNudge] APNs 푸시 실패:', e);
+        })
+      );
+    }
+    if (user.fcmToken) {
+      answererPushTasks.push(
+        pushService
+          .sendFcmPush(user.fcmToken, title, body, 'ANSWERER_NUDGE')
+          .catch((e) => {
+            console.warn('[AnswererNudge] FCM 푸시 실패:', e);
+          })
+      );
+    }
+  }
+  await Promise.all(answererPushTasks);
+
+  console.log(
+    `[AnswererNudge] Nudged ${answererUserMap.size} answerers across ${answererNudgedFamilyIds.size} families`
   );
 }
 

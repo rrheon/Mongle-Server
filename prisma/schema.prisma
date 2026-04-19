@@ -35,6 +35,7 @@ model User {
   notifAnswer            Boolean   @default(true)  @map("notif_answer")    // 구성원 답변 알림
   notifNudge             Boolean   @default(true)  @map("notif_nudge")     // 재촉하기 알림
   notifQuestion          Boolean   @default(true)  @map("notif_question")  // 새 질문 알림
+  notifAnswererNudge     Boolean   @default(true)  @map("notif_answerer_nudge") // 내가 답변 후 가족 미답변 알림
   quietHoursEnabled      Boolean   @default(true)  @map("quiet_hours_enabled")
   quietHoursStart        String    @default("22:00") @map("quiet_hours_start")
   quietHoursEnd          String    @default("08:00") @map("quiet_hours_end")
@@ -203,5 +204,6 @@ enum NotificationType {
   MEMBER_ANSWERED
   ALL_ANSWERED
   ANSWER_REQUEST
+  ANSWERER_NUDGE
   BADGE_EARNED
 }

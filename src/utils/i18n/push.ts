@@ -21,6 +21,7 @@ interface PushMessages {
   memberAnswered: { title: (senderName: string) => string; body: string };
   answerReminder: { title: string; body: string; bodyMulti: (count: number) => string };
   nudge: { title: string; body: (senderName: string) => string };
+  answererNudge: { title: string; body: (pendingCount: number) => string; bodyMulti: (questionCount: number) => string };
 }
 
 const messagesByLocale: Record<Locale, PushMessages> = {
@@ -42,6 +43,11 @@ const messagesByLocale: Record<Locale, PushMessages> = {
       title: '재촉하기 알림',
       body: (name) => `${name}님이 오늘의 질문에 답변해달라고 합니다`,
     },
+    answererNudge: {
+      title: '가족의 답변을 기다리는 중이에요',
+      body: (pending) => `아직 ${pending}명이 답변하지 않았어요. 접속해서 재촉해볼까요?`,
+      bodyMulti: (questions) => `${questions}개의 질문에 아직 답 안 한 가족이 있어요. 재촉해볼까요?`,
+    },
   },
   en: {
     newQuestion: {
@@ -61,6 +67,11 @@ const messagesByLocale: Record<Locale, PushMessages> = {
       title: 'A gentle nudge',
       body: (name) => `${name} is waiting for your answer on today's question`,
     },
+    answererNudge: {
+      title: 'Waiting on your family',
+      body: (pending) => `${pending} family member${pending > 1 ? 's have' : ' has'} not answered yet. Send a nudge?`,
+      bodyMulti: (questions) => `${questions} questions still need family answers. Nudge them now?`,
+    },
   },
   ja: {
     newQuestion: {
@@ -79,6 +90,11 @@ const messagesByLocale: Record<Locale, PushMessages> = {
     nudge: {
       title: 'リマインドが届きました',
       body: (name) => `${name}さんが今日の質問への回答を待っています`,
+    },
+    answererNudge: {
+      title: '家族の回答を待っています',
+      body: (pending) => `まだ${pending}人が回答していません。アプリを開いてリマインドを送りましょう`,
+      bodyMulti: (questions) => `${questions}件の質問に未回答の家族がいます。リマインドを送りましょう`,
     },
   },
 };
