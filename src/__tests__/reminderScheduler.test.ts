@@ -126,7 +126,7 @@ describe('sendDailyReminders', () => {
     expect(mockCreateNotification).not.toHaveBeenCalled();
   });
 
-  it('동일 유저의 미답변 복수 건은 bodyMulti 문구로 취합된다', async () => {
+  it('동일 유저의 미답변 복수 건이어도 (유저, 가족) 단위 1건으로 통합되며, 문구는 카운트 없이 단순화된다', async () => {
     mockDQFindMany.mockResolvedValue([
       { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
       { id: 'dq-2', questionId: 'q-2', familyId: 'fam-1', date: new Date('2026-04-16') },
@@ -141,8 +141,10 @@ describe('sendDailyReminders', () => {
 
     // (유저, 가족) 단위 1건
     expect(mockCreateNotification).toHaveBeenCalledTimes(1);
+    const title = mockCreateNotification.mock.calls[0][2] as string;
     const body = mockCreateNotification.mock.calls[0][3] as string;
-    expect(body).toContain('3건');
+    expect(title).toBe('오늘의 질문, 아직 답변 전이에요');
+    expect(body).not.toMatch(/\d+건/); // "N건" 형식 문구 제거 확인
     // 푸시도 1회
     expect(mockSendApnsPush).toHaveBeenCalledTimes(1);
   });

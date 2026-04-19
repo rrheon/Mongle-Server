@@ -39,7 +39,7 @@ function isSameDate(a: Date | null | undefined, b: Date | null | undefined): boo
  *   - 아직 답변/패스하지 않은 멤버에게만
  *   - 유저당 1회 푸시 (다중 그룹 소속, 다건 미답변이어도 중복 발송 없음)
  *   - DB 알림은 (유저, 가족) 단위 1건으로 제한하여 과도한 알림 방지
- *   - 미답변 2건 이상이면 bodyMulti(count) 로 묶어 표시
+ *   - 미답변이 다건이어도 표시 문구는 단순화("오늘의 질문, 아직 답변 전이에요")
  *
  * 전원이 이미 완료된 경우는 건너뜀.
  */
@@ -112,8 +112,8 @@ export async function sendDailyReminders(): Promise<void> {
     else answeredByQuestion.set(a.questionId, new Set([a.userId]));
   }
 
-  // 집계: 유저별 미답변 카운트, (유저, 가족) 키, 푸시 대상 유저 정보
-  const unansweredCountByUser = new Map<string, number>();
+  // 집계: (유저, 가족) 키, 푸시 대상 유저 정보
+  //   - 미답변 카운트는 더 이상 푸시 문구에 쓰지 않지만, 추후 확장(분석 등) 위해 제거는 하지 않음
   const userInfoMap = new Map<string, MembershipUser>();
   const dbNotifKeys = new Set<string>(); // `${userId}:${familyId}`
   const remindedFamilyIds = new Set<string>();
@@ -131,21 +131,17 @@ export async function sendDailyReminders(): Promise<void> {
     for (const m of unfinished) {
       const user = m.user;
       if (!user) continue;
-      unansweredCountByUser.set(
-        m.userId,
-        (unansweredCountByUser.get(m.userId) ?? 0) + 1
-      );
       if (!userInfoMap.has(m.userId)) userInfoMap.set(m.userId, user);
       dbNotifKeys.add(`${m.userId}:${dq.familyId}`);
     }
     remindedFamilyIds.add(dq.familyId);
   }
 
-  function makeBody(locale: string | null, count: number): { title: string; body: string } {
+  function makeBody(locale: string | null): { title: string; body: string } {
     const msgs = getPushMessages(locale);
     return {
       title: msgs.answerReminder.title,
-      body: count > 1 ? msgs.answerReminder.bodyMulti(count) : msgs.answerReminder.body,
+      body: msgs.answerReminder.body,
     };
   }
 
@@ -155,8 +151,7 @@ export async function sendDailyReminders(): Promise<void> {
     const [userId, familyIdForNotif] = key.split(':');
     const user = userInfoMap.get(userId);
     if (!user) continue;
-    const count = unansweredCountByUser.get(userId) ?? 1;
-    const { title, body } = makeBody(user.locale, count);
+    const { title, body } = makeBody(user.locale);
     dbNotifTasks.push(
       notificationService
         .createNotification(userId, 'ANSWER_REQUEST', title, body, familyIdForNotif)
@@ -171,8 +166,7 @@ export async function sendDailyReminders(): Promise<void> {
   const pushTasks: Promise<unknown>[] = [];
   for (const [userId, user] of userInfoMap) {
     if (!user.notifQuestion) continue;
-    const count = unansweredCountByUser.get(userId) ?? 1;
-    const { title, body } = makeBody(user.locale, count);
+    const { title, body } = makeBody(user.locale);
 
     if (user.apnsToken) {
       pushTasks.push(
