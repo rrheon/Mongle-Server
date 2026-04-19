@@ -30,16 +30,14 @@ export async function assignDailyQuestions(): Promise<void> {
     });
     if (existing) continue;
 
-    // 최근 미완료 질문 확인 (48시간 이내만 블로킹, 그 이상은 자동 넘김)
-    const twoDaysAgo = new Date(today);
-    twoDaysAgo.setUTCDate(twoDaysAgo.getUTCDate() - 2);
-
-    const recentDQ = await prisma.dailyQuestion.findFirst({
-      where: { familyId: family.id, date: { gte: twoDaysAgo, lt: today } },
+    // MG-16: 자동교체 없음. 가장 최근 DQ가 미완료면 무한정 대기.
+    // 완료된 경우에만 새 질문 발급. 48h 자동 넘김 로직 제거.
+    const latestDQ = await prisma.dailyQuestion.findFirst({
+      where: { familyId: family.id, date: { lt: today } },
       orderBy: { date: 'desc' },
     });
 
-    if (recentDQ) {
+    if (latestDQ) {
       const memberships = await prisma.familyMembership.findMany({
         where: { familyId: family.id },
         select: { userId: true, skippedDate: true },
@@ -48,7 +46,7 @@ export async function assignDailyQuestions(): Promise<void> {
       const answeredUserIds = new Set(
         (await prisma.answer.findMany({
           where: {
-            questionId: recentDQ.questionId,
+            questionId: latestDQ.questionId,
             userId: { in: memberships.map((m) => m.userId) },
           },
           select: { userId: true },
@@ -58,11 +56,13 @@ export async function assignDailyQuestions(): Promise<void> {
       const allCompleted = memberships.every(
         (m) =>
           answeredUserIds.has(m.userId) ||
-          (m.skippedDate !== null && m.skippedDate.getTime() === recentDQ.date.getTime())
+          (m.skippedDate !== null && m.skippedDate.getTime() === latestDQ.date.getTime())
       );
 
       if (!allCompleted) {
-        console.log(`[Scheduler] Skipped family ${family.id}: recent question not completed (within 48h window)`);
+        console.log(
+          `[Scheduler] Skipped family ${family.id}: previous question (${latestDQ.date.toISOString().split('T')[0]}) not completed`
+        );
         continue;
       }
     }

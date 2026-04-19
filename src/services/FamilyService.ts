@@ -9,6 +9,13 @@ import {
 } from '../models';
 import { Errors } from '../middleware/errorHandler';
 import { generateInviteCode, isValidInviteCode } from '../utils/inviteCode';
+import { QuestionService } from './QuestionService';
+
+function getKstToday(): Date {
+  const now = new Date();
+  const kstDateStr = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  return new Date(kstDateStr + 'T00:00:00.000Z');
+}
 
 const MAX_GROUPS = 3;
 const MAX_MEMBERS = 8; // MongleScene 수용 한계 기반 (collisionRadius=76pt, 유효 씬 면적 기준)
@@ -66,6 +73,15 @@ export class FamilyService {
 
       return newFamily;
     });
+
+    // MG-16: 가입 즉시 첫 질문 발급 (스케줄러의 KST 11시 cron까지 기다리지 않음).
+    // 트랜잭션 외부에서 호출 — 질문 풀 조회 등 부수효과가 있고, 실패해도 가족 생성은 성공해야 함.
+    try {
+      const questionService = new QuestionService();
+      await questionService.assignQuestionToFamily(family.id, getKstToday());
+    } catch (e) {
+      console.warn('[FamilyService] 첫 질문 발급 실패 (다음 스케줄러 실행 시 자동 재시도):', e);
+    }
 
     return this.getFamilyWithMembers(family.id);
   }
