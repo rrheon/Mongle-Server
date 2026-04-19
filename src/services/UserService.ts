@@ -259,6 +259,7 @@ export class UserService {
       notifAnswer: user.notifAnswer,
       notifNudge: user.notifNudge,
       notifQuestion: user.notifQuestion,
+      notifAnswererNudge: user.notifAnswererNudge,
       quietHoursEnabled: user.quietHoursEnabled,
       quietHoursStart: user.quietHoursStart,
       quietHoursEnd: user.quietHoursEnd,
@@ -274,6 +275,7 @@ export class UserService {
       notifAnswer?: boolean;
       notifNudge?: boolean;
       notifQuestion?: boolean;
+      notifAnswererNudge?: boolean;
       quietHoursEnabled?: boolean;
       quietHoursStart?: string;
       quietHoursEnd?: string;
@@ -286,6 +288,7 @@ export class UserService {
       notifAnswer: updated.notifAnswer,
       notifNudge: updated.notifNudge,
       notifQuestion: updated.notifQuestion,
+      notifAnswererNudge: updated.notifAnswererNudge,
       quietHoursEnabled: updated.quietHoursEnabled,
       quietHoursStart: updated.quietHoursStart,
       quietHoursEnd: updated.quietHoursEnd,

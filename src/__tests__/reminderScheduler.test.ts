@@ -38,6 +38,7 @@ const mockUser = {
   fcmToken: null,
   locale: 'ko',
   notifQuestion: true,
+  notifAnswererNudge: true,
 };
 
 describe('getKstMidnightUtc', () => {
@@ -216,7 +217,8 @@ describe('sendDailyReminders', () => {
 
     await sendDailyReminders();
 
-    expect(mockCreateNotification).toHaveBeenCalledTimes(1);
+    // user-2(미답변)에게 ANSWER_REQUEST 1건 + user-1(답변자)에게 ANSWERER_NUDGE 1건 = 총 2건
+    expect(mockCreateNotification).toHaveBeenCalledTimes(2);
     expect(mockCreateNotification).toHaveBeenCalledWith(
       'user-2',
       'ANSWER_REQUEST',
@@ -224,5 +226,158 @@ describe('sendDailyReminders', () => {
       expect.any(String),
       'fam-1'
     );
+    expect(mockCreateNotification).toHaveBeenCalledWith(
+      'user-1',
+      'ANSWERER_NUDGE',
+      expect.any(String),
+      expect.any(String),
+      'fam-1'
+    );
+  });
+});
+
+describe('sendDailyReminders - answerer nudge (MG-12)', () => {
+  it('본인 답변 + 가족 1명 미답변 → 답변자에게 ANSWERER_NUDGE DB/푸시 1회', async () => {
+    const otherUser = { ...mockUser, id: 'user-2', apnsToken: 'apns-2' };
+    mockDQFindMany.mockResolvedValue([
+      { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
+    ]);
+    mockMembershipFindMany.mockResolvedValue([
+      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, user: mockUser },
+      { userId: 'user-2', familyId: 'fam-1', skippedDate: null, user: otherUser },
+    ]);
+    mockAnswerFindMany.mockResolvedValue([{ questionId: 'q-1', userId: 'user-1' }]);
+
+    await sendDailyReminders();
+
+    const nudgeCalls = mockCreateNotification.mock.calls.filter(
+      (c) => c[1] === 'ANSWERER_NUDGE'
+    );
+    expect(nudgeCalls).toHaveLength(1);
+    expect(nudgeCalls[0][0]).toBe('user-1');
+    // body 에 "1명" 포함 (pendingCount=1)
+    expect(nudgeCalls[0][3]).toContain('1명');
+
+    // APNs 푸시: user-1(답변자) + user-2(미답변) 각 1회 = 2회
+    expect(mockSendApnsPush).toHaveBeenCalledTimes(2);
+    const apnsCallsAnswerer = mockSendApnsPush.mock.calls.filter(
+      (c) => c[3] === 'ANSWERER_NUDGE'
+    );
+    expect(apnsCallsAnswerer).toHaveLength(1);
+  });
+
+  it('전원 답변 완료 → 답변자 재촉 발송 안 함', async () => {
+    const otherUser = { ...mockUser, id: 'user-2' };
+    mockDQFindMany.mockResolvedValue([
+      { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
+    ]);
+    mockMembershipFindMany.mockResolvedValue([
+      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, user: mockUser },
+      { userId: 'user-2', familyId: 'fam-1', skippedDate: null, user: otherUser },
+    ]);
+    mockAnswerFindMany.mockResolvedValue([
+      { questionId: 'q-1', userId: 'user-1' },
+      { questionId: 'q-1', userId: 'user-2' },
+    ]);
+
+    await sendDailyReminders();
+
+    const nudgeCalls = mockCreateNotification.mock.calls.filter(
+      (c) => c[1] === 'ANSWERER_NUDGE'
+    );
+    expect(nudgeCalls).toHaveLength(0);
+  });
+
+  it('1인 가족 → 답변자 재촉 발송 안 함 (멤버십 1명 스킵)', async () => {
+    mockDQFindMany.mockResolvedValue([
+      { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
+    ]);
+    mockMembershipFindMany.mockResolvedValue([
+      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, user: mockUser },
+    ]);
+    mockAnswerFindMany.mockResolvedValue([{ questionId: 'q-1', userId: 'user-1' }]);
+
+    await sendDailyReminders();
+
+    const nudgeCalls = mockCreateNotification.mock.calls.filter(
+      (c) => c[1] === 'ANSWERER_NUDGE'
+    );
+    expect(nudgeCalls).toHaveLength(0);
+  });
+
+  it('notifAnswererNudge=false 유저는 푸시 제외 (DB 알림은 저장)', async () => {
+    const optedOutUser = { ...mockUser, notifAnswererNudge: false };
+    const otherUser = { ...mockUser, id: 'user-2', apnsToken: 'apns-2' };
+    mockDQFindMany.mockResolvedValue([
+      { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
+    ]);
+    mockMembershipFindMany.mockResolvedValue([
+      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, user: optedOutUser },
+      { userId: 'user-2', familyId: 'fam-1', skippedDate: null, user: otherUser },
+    ]);
+    mockAnswerFindMany.mockResolvedValue([{ questionId: 'q-1', userId: 'user-1' }]);
+
+    await sendDailyReminders();
+
+    const nudgeDb = mockCreateNotification.mock.calls.filter(
+      (c) => c[1] === 'ANSWERER_NUDGE'
+    );
+    expect(nudgeDb).toHaveLength(1); // DB 알림은 저장
+
+    const nudgeApns = mockSendApnsPush.mock.calls.filter(
+      (c) => c[3] === 'ANSWERER_NUDGE'
+    );
+    expect(nudgeApns).toHaveLength(0); // 푸시는 제외
+  });
+
+  it('4일 윈도우 밖 DQ(5일 전)는 답변자 재촉 대상에서 제외', async () => {
+    const otherUser = { ...mockUser, id: 'user-2' };
+    // 오늘 = now — mock 기준일 없음. REMINDER_WINDOW_DAYS=7 이므로 DQ 5일 전이 7일 윈도우엔 들어옴
+    // 그러나 ANSWERER_NUDGE_WINDOW_DAYS=4 이므로 답변자 재촉 대상에선 빠져야 함
+    const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+    mockDQFindMany.mockResolvedValue([
+      { id: 'dq-old', questionId: 'q-old', familyId: 'fam-1', date: fiveDaysAgo },
+    ]);
+    mockMembershipFindMany.mockResolvedValue([
+      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, user: mockUser },
+      { userId: 'user-2', familyId: 'fam-1', skippedDate: null, user: otherUser },
+    ]);
+    mockAnswerFindMany.mockResolvedValue([{ questionId: 'q-old', userId: 'user-1' }]);
+
+    await sendDailyReminders();
+
+    const nudgeCalls = mockCreateNotification.mock.calls.filter(
+      (c) => c[1] === 'ANSWERER_NUDGE'
+    );
+    expect(nudgeCalls).toHaveLength(0);
+  });
+
+  it('답변자가 복수 질문에서 가족 미답변 상태면 bodyMulti 문구 사용', async () => {
+    const otherUser = { ...mockUser, id: 'user-2' };
+    const today = new Date();
+    const y1 = new Date(today.getTime() - 1 * 24 * 60 * 60 * 1000);
+    const y2 = new Date(today.getTime() - 2 * 24 * 60 * 60 * 1000);
+    mockDQFindMany.mockResolvedValue([
+      { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: today },
+      { id: 'dq-2', questionId: 'q-2', familyId: 'fam-1', date: y1 },
+      { id: 'dq-3', questionId: 'q-3', familyId: 'fam-1', date: y2 },
+    ]);
+    mockMembershipFindMany.mockResolvedValue([
+      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, user: mockUser },
+      { userId: 'user-2', familyId: 'fam-1', skippedDate: null, user: otherUser },
+    ]);
+    mockAnswerFindMany.mockResolvedValue([
+      { questionId: 'q-1', userId: 'user-1' },
+      { questionId: 'q-2', userId: 'user-1' },
+      { questionId: 'q-3', userId: 'user-1' },
+    ]);
+
+    await sendDailyReminders();
+
+    const nudgeCalls = mockCreateNotification.mock.calls.filter(
+      (c) => c[1] === 'ANSWERER_NUDGE'
+    );
+    expect(nudgeCalls).toHaveLength(1); // (user-1, fam-1) 단위 1건
+    expect(nudgeCalls[0][3]).toContain('3개'); // 3개 질문
   });
 });
