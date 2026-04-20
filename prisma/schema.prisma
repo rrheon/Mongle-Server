@@ -206,4 +206,5 @@ enum NotificationType {
   ANSWER_REQUEST
   ANSWERER_NUDGE
   BADGE_EARNED
+  REMINDER
 }
