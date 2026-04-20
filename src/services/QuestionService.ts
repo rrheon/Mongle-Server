@@ -53,25 +53,21 @@ export class QuestionService {
     });
 
     if (!dailyQuestion) {
-      // 가장 최근 미완료 질문을 탐색 (어제 → 그 이전)
-      // 48시간(2일) 이상 지난 질문은 미완료여도 자동 넘김
-      const twoDaysAgo = new Date(today);
-      twoDaysAgo.setUTCDate(twoDaysAgo.getUTCDate() - 2);
-
-      const recentDQ = await prisma.dailyQuestion.findFirst({
-        where: { familyId, date: { gte: twoDaysAgo, lt: today } },
+      // MG-16: 자동교체 없음. 가장 최근 DQ를 무기한 carry over.
+      // - 미완료면 그대로 (전원 답변 대기 중)
+      // - 완료됐는데 오늘자가 없으면 (스케줄러 발급 전) 그대로 (다음 11시까지 대기)
+      // - DQ가 아예 없으면 (신규 가족 등) 즉시 배정
+      const latestDQ = await prisma.dailyQuestion.findFirst({
+        where: { familyId, date: { lt: today } },
         include: { question: true },
         orderBy: { date: 'desc' },
       });
 
-      if (recentDQ) {
-        const allCompleted = await this.isQuestionCompleted(familyId, recentDQ.questionId, recentDQ.date);
-        if (!allCompleted) {
-          // 미완료 질문이 48시간 이내: 해당 질문을 그대로 반환
-          return this.toDailyQuestionResponse(recentDQ, user.id, familyId, lang);
-        }
+      if (latestDQ) {
+        return this.toDailyQuestionResponse(latestDQ, user.id, familyId, lang);
       }
-      // 미완료 질문 없거나 48시간 초과 → 새 질문 배정
+
+      // 첫 질문이 한 번도 없는 경우(가입 직후 등) → 즉시 배정
       dailyQuestion = await this.assignQuestionToFamily(familyId, today);
     }
 
@@ -134,17 +130,13 @@ export class QuestionService {
     });
 
     if (!dailyQuestion) {
-      const twoDaysAgo = new Date(today);
-      twoDaysAgo.setUTCDate(twoDaysAgo.getUTCDate() - 2);
-      const recentDQ = await prisma.dailyQuestion.findFirst({
-        where: { familyId, date: { gte: twoDaysAgo, lt: today } },
+      // MG-16: 자동교체 없음. 가장 최근 DQ를 무기한 carry over.
+      const latestDQ = await prisma.dailyQuestion.findFirst({
+        where: { familyId, date: { lt: today } },
         include: { question: true },
         orderBy: { date: 'desc' },
       });
-      if (recentDQ) {
-        const allCompleted = await this.isQuestionCompleted(familyId, recentDQ.questionId, recentDQ.date);
-        if (!allCompleted) dailyQuestion = recentDQ;
-      }
+      if (latestDQ) dailyQuestion = latestDQ;
     }
 
     if (!dailyQuestion) throw Errors.notFound('오늘의 질문');
@@ -442,9 +434,10 @@ export class QuestionService {
   }
 
   /**
-   * 가족에게 질문 배정 (최근 30일 제외)
+   * 가족에게 질문 배정 (최근 30일 제외).
+   * MG-16: 가족 생성 직후 첫 질문 발급에도 사용되므로 public.
    */
-  private async assignQuestionToFamily(familyId: string, date: Date) {
+  async assignQuestionToFamily(familyId: string, date: Date) {
     const recentDate = new Date(date);
     recentDate.setDate(recentDate.getDate() - 30);
 

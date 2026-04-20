@@ -1,37 +1,20 @@
 import prisma from '../utils/prisma';
 
-/**
- * KST 기준 오늘을 UTC 자정 Date 로 반환.
- * (@db.Date 칼럼의 저장 컨벤션과 동일)
- */
-function getKstToday(): Date {
-  const now = new Date();
-  const kstDateStr = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
-  return new Date(kstDateStr + 'T00:00:00.000Z');
-}
-
 function isSameDate(a: Date | null | undefined, b: Date | null | undefined): boolean {
   if (!a || !b) return false;
   return a.toISOString().split('T')[0] === b.toISOString().split('T')[0];
 }
 
 /**
- * 해당 DailyQuestion이 "그룹 전원이 답변 또는 패스 완료" 상태가 되었는지 확인한 뒤,
- * 완료 상태라면 DailyQuestion.date 를 KST 기준 오늘로 이동(=finalize)시킨다.
+ * 해당 DailyQuestion이 "그룹 전원이 답변 또는 패스 완료" 상태인지 확인하고 로깅한다.
  *
- * 배정일자(4/7)에 받아온 질문을 실제로는 4/9에 그룹이 다 같이 마무리하는 경우,
- * history/정렬/스케줄러 모두 "4/9에 완료됐다" 로 동작하도록 만드는 핵심 함수.
+ * MG-16 이전: 완료 시 DQ.date 를 오늘로 이동시켜 history/스케줄러 정렬에 활용했음.
+ * MG-16 이후: "전원 답변 → 다음 11시 새 질문 발행" 룰을 위해 같은 날 두 개의 DQ가
+ * 필요해졌고, @@unique([familyId, date]) 충돌을 피하려면 date 가 배정일로 고정돼야 함.
+ * 따라서 date 이동은 더 이상 수행하지 않는다. 완료 여부 판정은 호출 측에서 런타임으로
+ * (isQuestionCompleted/스케줄러) 수행한다.
  *
- * 동작:
- *   1. DQ 가 이미 오늘 날짜이면 no-op (이미 finalize 됨)
- *   2. 그룹 멤버 전원의 답변/패스 상태 확인
- *   3. 완료 상태라면 트랜잭션으로:
- *       - DailyQuestion.date ← 오늘 (KST)
- *       - 기존 DQ.date 기준으로 패스했던 멤버들의 FamilyMembership.skippedDate 도 함께 오늘로 이동
- *         (= 완료 스냅샷과 일관성 유지 — isSameDate(skippedDate, dq.date) 가 계속 true 여야 함)
- *   4. @@unique([familyId, date]) 충돌 (동일 familyId 에 오늘자 DQ 가 이미 존재) 시 원본 유지
- *
- * 멱등성: 여러 번 호출돼도 안전 (이미 완료됐거나 이미 이동된 경우 no-op).
+ * 멱등성: 여러 번 호출돼도 안전 (DB 변경 없음).
  */
 export async function tryFinalizeDailyQuestion(params: {
   familyId: string;
@@ -65,34 +48,7 @@ export async function tryFinalizeDailyQuestion(params: {
   );
   if (!allCompleted) return;
 
-  const today = getKstToday();
-  // 이미 오늘자로 finalize 된 경우 (= 당일 안에 모두 답함)
-  if (isSameDate(dq.date, today)) return;
-
-  try {
-    await prisma.$transaction([
-      prisma.dailyQuestion.update({
-        where: { id: dq.id },
-        data: { date: today },
-      }),
-      // 기존 DQ.date 기준으로 패스했던 멤버들의 skippedDate 도 동일하게 이동
-      prisma.familyMembership.updateMany({
-        where: { familyId, skippedDate: dq.date },
-        data: { skippedDate: today },
-      }),
-    ]);
-    console.log(
-      `[DQ Finalize] family=${familyId} dq=${dq.id} ${dq.date.toISOString().split('T')[0]} → ${today.toISOString().split('T')[0]}`
-    );
-  } catch (e) {
-    const code = (e as { code?: string } | null)?.code;
-    if (code === 'P2002') {
-      // 동일 familyId + 오늘 날짜에 이미 다른 DQ 가 존재 (희귀 동시성 케이스)
-      console.warn(
-        `[DQ Finalize] unique 충돌, 날짜 이동 생략: family=${familyId} dq=${dailyQuestionId} → ${today.toISOString().split('T')[0]}`
-      );
-      return;
-    }
-    throw e;
-  }
+  console.log(
+    `[DQ Finalize] family=${familyId} dq=${dq.id} date=${dq.date.toISOString().split('T')[0]} 전원 완료`
+  );
 }
