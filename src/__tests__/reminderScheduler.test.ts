@@ -38,7 +38,6 @@ const mockUser = {
   fcmToken: null,
   locale: 'ko',
   notifQuestion: true,
-  notifAnswererNudge: true,
 };
 
 describe('getKstMidnightUtc', () => {
@@ -61,7 +60,21 @@ describe('getKstMidnightUtc', () => {
   });
 });
 
-describe('sendDailyReminders', () => {
+/**
+ * MG-19: 저녁 7시 리마인더 알림 — 답변자/미답변자 메시지 분기 + 전원 발송
+ *
+ * 신규 스펙:
+ *   - 그룹 내 미답변자 ≥ 1 일 때 그룹 전원(답변자+미답변자)에게 발송
+ *   - type=REMINDER (DB 레코드 및 FCM/APNs payload)
+ *   - 답변자:   "미답변자가 있어요" / "그룹에 접속해서 재촉하기를 해봐요"
+ *   - 미답변자: "오늘 질문에 답변하지 않았어요" / "그룹에 접속해서 답변을 달아봐요"
+ *   - notifQuestion 토글 존중
+ */
+describe('sendDailyReminders (MG-19)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
   it('후보 DailyQuestion이 없으면 배치 조회와 알림 호출을 건너뛴다', async () => {
     mockDQFindMany.mockResolvedValue([]);
 
@@ -73,7 +86,7 @@ describe('sendDailyReminders', () => {
     expect(mockSendApnsPush).not.toHaveBeenCalled();
   });
 
-  it('미답변 멤버에게 DB 알림과 APNs 푸시를 각 1회 발송한다', async () => {
+  it('1인 가족 미답변자에게 REMINDER(미답변자 문구)로 DB/푸시 1회 발송한다', async () => {
     mockDQFindMany.mockResolvedValue([
       { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
     ]);
@@ -87,16 +100,23 @@ describe('sendDailyReminders', () => {
     expect(mockCreateNotification).toHaveBeenCalledTimes(1);
     expect(mockCreateNotification).toHaveBeenCalledWith(
       'user-1',
-      'ANSWER_REQUEST',
-      expect.any(String),
-      expect.any(String),
+      'REMINDER',
+      '오늘 질문에 답변하지 않았어요',
+      '그룹에 접속해서 답변을 달아봐요',
       'fam-1'
     );
     expect(mockSendApnsPush).toHaveBeenCalledTimes(1);
+    expect(mockSendApnsPush).toHaveBeenCalledWith(
+      'apns-token',
+      '오늘 질문에 답변하지 않았어요',
+      '그룹에 접속해서 답변을 달아봐요',
+      'REMINDER',
+      0
+    );
     expect(mockSendFcmPush).not.toHaveBeenCalled();
   });
 
-  it('전원 답변 완료 시 알림을 발송하지 않는다', async () => {
+  it('전원 답변 완료 시 알림을 발송하지 않는다 (미답변자 0명)', async () => {
     mockDQFindMany.mockResolvedValue([
       { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
     ]);
@@ -126,7 +146,50 @@ describe('sendDailyReminders', () => {
     expect(mockCreateNotification).not.toHaveBeenCalled();
   });
 
-  it('동일 유저의 미답변 복수 건이어도 (유저, 가족) 단위 1건으로 통합되며, 문구는 카운트 없이 단순화된다', async () => {
+  it('부분 답변 시 답변자/미답변자 각자 분기된 문구로 REMINDER 발송한다', async () => {
+    const otherUser = { ...mockUser, id: 'user-2', apnsToken: 'apns-2' };
+    mockDQFindMany.mockResolvedValue([
+      { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
+    ]);
+    mockMembershipFindMany.mockResolvedValue([
+      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, user: mockUser },
+      { userId: 'user-2', familyId: 'fam-1', skippedDate: null, user: otherUser },
+    ]);
+    // user-1 답변, user-2 미답변
+    mockAnswerFindMany.mockResolvedValue([{ questionId: 'q-1', userId: 'user-1' }]);
+
+    await sendDailyReminders();
+
+    // DB 알림: user-1(답변자 문구), user-2(미답변자 문구) 각 1건 — 모두 type=REMINDER
+    expect(mockCreateNotification).toHaveBeenCalledTimes(2);
+    expect(mockCreateNotification).toHaveBeenCalledWith(
+      'user-1',
+      'REMINDER',
+      '미답변자가 있어요',
+      '그룹에 접속해서 재촉하기를 해봐요',
+      'fam-1'
+    );
+    expect(mockCreateNotification).toHaveBeenCalledWith(
+      'user-2',
+      'REMINDER',
+      '오늘 질문에 답변하지 않았어요',
+      '그룹에 접속해서 답변을 달아봐요',
+      'fam-1'
+    );
+
+    // APNs 푸시: 각 유저에게 1회씩 (총 2회), type=REMINDER
+    expect(mockSendApnsPush).toHaveBeenCalledTimes(2);
+    const user1Push = mockSendApnsPush.mock.calls.find((c) => c[0] === 'apns-token');
+    const user2Push = mockSendApnsPush.mock.calls.find((c) => c[0] === 'apns-2');
+    expect(user1Push).toBeDefined();
+    expect(user1Push![1]).toBe('미답변자가 있어요');
+    expect(user1Push![3]).toBe('REMINDER');
+    expect(user2Push).toBeDefined();
+    expect(user2Push![1]).toBe('오늘 질문에 답변하지 않았어요');
+    expect(user2Push![3]).toBe('REMINDER');
+  });
+
+  it('동일 유저의 미답변 복수 건이어도 (유저, 가족) 단위 1건으로 통합된다', async () => {
     mockDQFindMany.mockResolvedValue([
       { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
       { id: 'dq-2', questionId: 'q-2', familyId: 'fam-1', date: new Date('2026-04-16') },
@@ -139,13 +202,8 @@ describe('sendDailyReminders', () => {
 
     await sendDailyReminders();
 
-    // (유저, 가족) 단위 1건
+    // (유저, 가족) 단위 1건 — 여러 질문 미답변이어도 dedup
     expect(mockCreateNotification).toHaveBeenCalledTimes(1);
-    const title = mockCreateNotification.mock.calls[0][2] as string;
-    const body = mockCreateNotification.mock.calls[0][3] as string;
-    expect(title).toBe('오늘의 질문, 아직 답변 전이에요');
-    expect(body).not.toMatch(/\d+건/); // "N건" 형식 문구 제거 확인
-    // 푸시도 1회
     expect(mockSendApnsPush).toHaveBeenCalledTimes(1);
   });
 
@@ -186,7 +244,7 @@ describe('sendDailyReminders', () => {
     expect(mockSendApnsPush).not.toHaveBeenCalled();
   });
 
-  it('FCM 토큰만 있는 유저에게는 FCM 푸시만 발송된다', async () => {
+  it('FCM 토큰만 있는 유저에게는 FCM 푸시만 발송된다 (type=REMINDER)', async () => {
     mockDQFindMany.mockResolvedValue([
       { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
     ]);
@@ -204,71 +262,15 @@ describe('sendDailyReminders', () => {
 
     expect(mockSendApnsPush).not.toHaveBeenCalled();
     expect(mockSendFcmPush).toHaveBeenCalledTimes(1);
-  });
-
-  it('가족 멤버 중 일부만 답변했으면 미답변 멤버만 대상이 된다', async () => {
-    const otherUser = { ...mockUser, id: 'user-2' };
-    mockDQFindMany.mockResolvedValue([
-      { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
-    ]);
-    mockMembershipFindMany.mockResolvedValue([
-      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, user: mockUser },
-      { userId: 'user-2', familyId: 'fam-1', skippedDate: null, user: otherUser },
-    ]);
-    mockAnswerFindMany.mockResolvedValue([{ questionId: 'q-1', userId: 'user-1' }]);
-
-    await sendDailyReminders();
-
-    // user-2(미답변)에게 ANSWER_REQUEST 1건 + user-1(답변자)에게 ANSWERER_NUDGE 1건 = 총 2건
-    expect(mockCreateNotification).toHaveBeenCalledTimes(2);
-    expect(mockCreateNotification).toHaveBeenCalledWith(
-      'user-2',
-      'ANSWER_REQUEST',
-      expect.any(String),
-      expect.any(String),
-      'fam-1'
-    );
-    expect(mockCreateNotification).toHaveBeenCalledWith(
-      'user-1',
-      'ANSWERER_NUDGE',
-      expect.any(String),
-      expect.any(String),
-      'fam-1'
+    expect(mockSendFcmPush).toHaveBeenCalledWith(
+      'fcm-token',
+      '오늘 질문에 답변하지 않았어요',
+      '그룹에 접속해서 답변을 달아봐요',
+      'REMINDER'
     );
   });
-});
 
-describe('sendDailyReminders - answerer nudge (MG-12)', () => {
-  it('본인 답변 + 가족 1명 미답변 → 답변자에게 ANSWERER_NUDGE DB/푸시 1회', async () => {
-    const otherUser = { ...mockUser, id: 'user-2', apnsToken: 'apns-2' };
-    mockDQFindMany.mockResolvedValue([
-      { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
-    ]);
-    mockMembershipFindMany.mockResolvedValue([
-      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, user: mockUser },
-      { userId: 'user-2', familyId: 'fam-1', skippedDate: null, user: otherUser },
-    ]);
-    mockAnswerFindMany.mockResolvedValue([{ questionId: 'q-1', userId: 'user-1' }]);
-
-    await sendDailyReminders();
-
-    const nudgeCalls = mockCreateNotification.mock.calls.filter(
-      (c) => c[1] === 'ANSWERER_NUDGE'
-    );
-    expect(nudgeCalls).toHaveLength(1);
-    expect(nudgeCalls[0][0]).toBe('user-1');
-    // body 에 "1명" 포함 (pendingCount=1)
-    expect(nudgeCalls[0][3]).toContain('1명');
-
-    // APNs 푸시: user-1(답변자) + user-2(미답변) 각 1회 = 2회
-    expect(mockSendApnsPush).toHaveBeenCalledTimes(2);
-    const apnsCallsAnswerer = mockSendApnsPush.mock.calls.filter(
-      (c) => c[3] === 'ANSWERER_NUDGE'
-    );
-    expect(apnsCallsAnswerer).toHaveLength(1);
-  });
-
-  it('전원 답변 완료 → 답변자 재촉 발송 안 함', async () => {
+  it('답변자가 있더라도 그룹 전원이 답변이면 발송하지 않는다', async () => {
     const otherUser = { ...mockUser, id: 'user-2' };
     mockDQFindMany.mockResolvedValue([
       { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
@@ -284,102 +286,7 @@ describe('sendDailyReminders - answerer nudge (MG-12)', () => {
 
     await sendDailyReminders();
 
-    const nudgeCalls = mockCreateNotification.mock.calls.filter(
-      (c) => c[1] === 'ANSWERER_NUDGE'
-    );
-    expect(nudgeCalls).toHaveLength(0);
-  });
-
-  it('1인 가족 → 답변자 재촉 발송 안 함 (멤버십 1명 스킵)', async () => {
-    mockDQFindMany.mockResolvedValue([
-      { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
-    ]);
-    mockMembershipFindMany.mockResolvedValue([
-      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, user: mockUser },
-    ]);
-    mockAnswerFindMany.mockResolvedValue([{ questionId: 'q-1', userId: 'user-1' }]);
-
-    await sendDailyReminders();
-
-    const nudgeCalls = mockCreateNotification.mock.calls.filter(
-      (c) => c[1] === 'ANSWERER_NUDGE'
-    );
-    expect(nudgeCalls).toHaveLength(0);
-  });
-
-  it('notifAnswererNudge=false 유저는 푸시 제외 (DB 알림은 저장)', async () => {
-    const optedOutUser = { ...mockUser, notifAnswererNudge: false };
-    const otherUser = { ...mockUser, id: 'user-2', apnsToken: 'apns-2' };
-    mockDQFindMany.mockResolvedValue([
-      { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
-    ]);
-    mockMembershipFindMany.mockResolvedValue([
-      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, user: optedOutUser },
-      { userId: 'user-2', familyId: 'fam-1', skippedDate: null, user: otherUser },
-    ]);
-    mockAnswerFindMany.mockResolvedValue([{ questionId: 'q-1', userId: 'user-1' }]);
-
-    await sendDailyReminders();
-
-    const nudgeDb = mockCreateNotification.mock.calls.filter(
-      (c) => c[1] === 'ANSWERER_NUDGE'
-    );
-    expect(nudgeDb).toHaveLength(1); // DB 알림은 저장
-
-    const nudgeApns = mockSendApnsPush.mock.calls.filter(
-      (c) => c[3] === 'ANSWERER_NUDGE'
-    );
-    expect(nudgeApns).toHaveLength(0); // 푸시는 제외
-  });
-
-  it('4일 윈도우 밖 DQ(5일 전)는 답변자 재촉 대상에서 제외', async () => {
-    const otherUser = { ...mockUser, id: 'user-2' };
-    // 오늘 = now — mock 기준일 없음. REMINDER_WINDOW_DAYS=7 이므로 DQ 5일 전이 7일 윈도우엔 들어옴
-    // 그러나 ANSWERER_NUDGE_WINDOW_DAYS=4 이므로 답변자 재촉 대상에선 빠져야 함
-    const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
-    mockDQFindMany.mockResolvedValue([
-      { id: 'dq-old', questionId: 'q-old', familyId: 'fam-1', date: fiveDaysAgo },
-    ]);
-    mockMembershipFindMany.mockResolvedValue([
-      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, user: mockUser },
-      { userId: 'user-2', familyId: 'fam-1', skippedDate: null, user: otherUser },
-    ]);
-    mockAnswerFindMany.mockResolvedValue([{ questionId: 'q-old', userId: 'user-1' }]);
-
-    await sendDailyReminders();
-
-    const nudgeCalls = mockCreateNotification.mock.calls.filter(
-      (c) => c[1] === 'ANSWERER_NUDGE'
-    );
-    expect(nudgeCalls).toHaveLength(0);
-  });
-
-  it('답변자가 복수 질문에서 가족 미답변 상태면 bodyMulti 문구 사용', async () => {
-    const otherUser = { ...mockUser, id: 'user-2' };
-    const today = new Date();
-    const y1 = new Date(today.getTime() - 1 * 24 * 60 * 60 * 1000);
-    const y2 = new Date(today.getTime() - 2 * 24 * 60 * 60 * 1000);
-    mockDQFindMany.mockResolvedValue([
-      { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: today },
-      { id: 'dq-2', questionId: 'q-2', familyId: 'fam-1', date: y1 },
-      { id: 'dq-3', questionId: 'q-3', familyId: 'fam-1', date: y2 },
-    ]);
-    mockMembershipFindMany.mockResolvedValue([
-      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, user: mockUser },
-      { userId: 'user-2', familyId: 'fam-1', skippedDate: null, user: otherUser },
-    ]);
-    mockAnswerFindMany.mockResolvedValue([
-      { questionId: 'q-1', userId: 'user-1' },
-      { questionId: 'q-2', userId: 'user-1' },
-      { questionId: 'q-3', userId: 'user-1' },
-    ]);
-
-    await sendDailyReminders();
-
-    const nudgeCalls = mockCreateNotification.mock.calls.filter(
-      (c) => c[1] === 'ANSWERER_NUDGE'
-    );
-    expect(nudgeCalls).toHaveLength(1); // (user-1, fam-1) 단위 1건
-    expect(nudgeCalls[0][3]).toContain('3개'); // 3개 질문
+    expect(mockCreateNotification).not.toHaveBeenCalled();
+    expect(mockSendApnsPush).not.toHaveBeenCalled();
   });
 });

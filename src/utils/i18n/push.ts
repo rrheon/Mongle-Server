@@ -22,6 +22,11 @@ interface PushMessages {
   answerReminder: { title: string; body: string; bodyMulti: (count: number) => string };
   nudge: { title: string; body: (senderName: string) => string };
   answererNudge: { title: string; body: (pendingCount: number) => string; bodyMulti: (questionCount: number) => string };
+  // MG-19: KST 19:00 스케줄 리마인더 — 답변자/미답변자 분기 문구
+  reminder: {
+    answered: { title: string; body: string };
+    unanswered: { title: string; body: string };
+  };
 }
 
 const messagesByLocale: Record<Locale, PushMessages> = {
@@ -48,6 +53,16 @@ const messagesByLocale: Record<Locale, PushMessages> = {
       body: (pending) => `아직 ${pending}명이 답변하지 않았어요. 접속해서 재촉해볼까요?`,
       bodyMulti: (questions) => `${questions}개의 질문에 아직 답 안 한 가족이 있어요. 재촉해볼까요?`,
     },
+    reminder: {
+      answered: {
+        title: '미답변자가 있어요',
+        body: '그룹에 접속해서 재촉하기를 해봐요',
+      },
+      unanswered: {
+        title: '오늘 질문에 답변하지 않았어요',
+        body: '그룹에 접속해서 답변을 달아봐요',
+      },
+    },
   },
   en: {
     newQuestion: {
@@ -72,6 +87,16 @@ const messagesByLocale: Record<Locale, PushMessages> = {
       body: (pending) => `${pending} family member${pending > 1 ? 's have' : ' has'} not answered yet. Send a nudge?`,
       bodyMulti: (questions) => `${questions} questions still need family answers. Nudge them now?`,
     },
+    reminder: {
+      answered: {
+        title: 'Someone has not answered yet',
+        body: 'Open the group and send a nudge',
+      },
+      unanswered: {
+        title: "You have not answered today's question",
+        body: 'Open the group and leave your answer',
+      },
+    },
   },
   ja: {
     newQuestion: {
@@ -95,6 +120,16 @@ const messagesByLocale: Record<Locale, PushMessages> = {
       title: '家族の回答を待っています',
       body: (pending) => `まだ${pending}人が回答していません。アプリを開いてリマインドを送りましょう`,
       bodyMulti: (questions) => `${questions}件の質問に未回答の家族がいます。リマインドを送りましょう`,
+    },
+    reminder: {
+      answered: {
+        title: '未回答の家族がいます',
+        body: 'グループに入ってリマインドを送りましょう',
+      },
+      unanswered: {
+        title: '今日の質問にまだ回答していません',
+        body: 'グループに入って回答してみましょう',
+      },
     },
   },
 };
