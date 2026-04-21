@@ -67,9 +67,9 @@ export class UserController extends Controller {
   @SuccessResponse(200, '성공')
   public async registerDeviceToken(
     @Request() req: AuthRequest,
-    @Body() body: { token: string }
+    @Body() body: { token: string; environment?: 'sandbox' | 'production' }
   ): Promise<{ ok: boolean }> {
-    await this.userService.registerDeviceToken(req.user.userId, body.token);
+    await this.userService.registerDeviceToken(req.user.userId, body.token, body.environment);
     return { ok: true };
   }
 

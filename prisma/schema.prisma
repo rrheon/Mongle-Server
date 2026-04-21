@@ -22,6 +22,9 @@ model User {
   updatedAt          DateTime           @updatedAt @map("updated_at")
   moodId             String?            @default("loved") @map("mood_id")
   apnsToken          String?            @map("apns_token")
+  // iOS 빌드 환경에 따른 APNs 호스트 선택용. Debug 빌드는 sandbox, TestFlight/Store는 production.
+  // 토큰 등록 API에서 클라이언트가 함께 전달하며, 기존 레코드는 v1 배포 유저라 production default.
+  apnsEnvironment    ApnsEnvironment?   @default(production) @map("apns_environment")
   fcmToken           String?            @map("fcm_token")
   // Accept-Language 기반 사용자 선호 언어 (ko/en/ja). 서버가 푸시 알림 문구를 다국어로 선택할 때 사용.
   locale             String?            @map("locale")
@@ -207,4 +210,9 @@ enum NotificationType {
   ANSWERER_NUDGE
   BADGE_EARNED
   REMINDER
+}
+
+enum ApnsEnvironment {
+  sandbox
+  production
 }

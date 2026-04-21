@@ -35,6 +35,7 @@ import { sendDailyReminders, getKstMidnightUtc } from '../reminderScheduler';
 const mockUser = {
   id: 'user-1',
   apnsToken: 'apns-token',
+  apnsEnvironment: 'production' as 'sandbox' | 'production' | null,
   fcmToken: null,
   locale: 'ko',
   notifQuestion: true,
@@ -111,7 +112,8 @@ describe('sendDailyReminders (MG-19)', () => {
       '오늘 질문에 답변하지 않았어요',
       '그룹에 접속해서 답변을 달아봐요',
       'REMINDER',
-      0
+      0,
+      'production'
     );
     expect(mockSendFcmPush).not.toHaveBeenCalled();
   });

@@ -342,7 +342,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       if (!userId) { res.status(400).json({ error: 'userId required' }); return; }
       const user = await prisma.user.findUnique({
         where: { id: userId },
-        select: { apnsToken: true, fcmToken: true },
+        select: { apnsToken: true, apnsEnvironment: true, fcmToken: true },
       });
       if (!user) { res.status(404).json({ error: 'user not found' }); return; }
 
@@ -351,7 +351,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       const b = body ?? '이 알림이 보이면 APNs 경로는 정상입니다';
 
       const apnsResult = user.apnsToken
-        ? await pushService.sendApnsPushDiagnostic(user.apnsToken, t, b, 'ANSWER_REQUEST')
+        ? await pushService.sendApnsPushDiagnostic(user.apnsToken, t, b, 'ANSWER_REQUEST', user.apnsEnvironment)
         : { skipped: true, reason: 'no apnsToken' };
 
       res.json({

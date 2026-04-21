@@ -78,7 +78,7 @@ export class NudgeService {
         pushTasks.push(
           (async () => {
             const badgeCount = await notificationService.getUnreadCount(target.id);
-            await pushService.sendApnsPush(target.apnsToken!, nudgeTitle, nudgeBody, 'ANSWER_REQUEST', badgeCount);
+            await pushService.sendApnsPush(target.apnsToken!, nudgeTitle, nudgeBody, 'ANSWER_REQUEST', badgeCount, target.apnsEnvironment);
           })().catch((e) => {
             console.warn('[Nudge] APNs 푸시 실패:', e);
           })

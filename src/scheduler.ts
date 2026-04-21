@@ -21,7 +21,7 @@ export async function assignDailyQuestions(): Promise<void> {
   let assigned = 0;
 
   // 푸시 발송 대상을 유저 단위로 모아 중복 방지 (다중 그룹 소속 유저에게 1회만 발송)
-  const pushTargets = new Map<string, { apnsToken: string | null; fcmToken: string | null; locale: string | null; notifQuestion: boolean }>();
+  const pushTargets = new Map<string, { apnsToken: string | null; apnsEnvironment: 'sandbox' | 'production' | null; fcmToken: string | null; locale: string | null; notifQuestion: boolean }>();
   const dbNotifTasks: Promise<unknown>[] = [];
 
   for (const family of families) {
@@ -87,7 +87,7 @@ export async function assignDailyQuestions(): Promise<void> {
     // 가족 멤버 전원에게 DB 알림 저장 (그룹별 기록 유지) + 푸시 대상 수집
     const members = await prisma.user.findMany({
       where: { familyId: family.id },
-      select: { id: true, apnsToken: true, fcmToken: true, locale: true, notifQuestion: true },
+      select: { id: true, apnsToken: true, apnsEnvironment: true, fcmToken: true, locale: true, notifQuestion: true },
     });
     for (const member of members) {
       const msgs = getPushMessages(member.locale);
@@ -105,6 +105,7 @@ export async function assignDailyQuestions(): Promise<void> {
       if (!pushTargets.has(member.id)) {
         pushTargets.set(member.id, {
           apnsToken: member.apnsToken,
+          apnsEnvironment: member.apnsEnvironment,
           fcmToken: member.fcmToken,
           locale: member.locale,
           notifQuestion: member.notifQuestion,
@@ -128,7 +129,7 @@ export async function assignDailyQuestions(): Promise<void> {
       pushTasks.push(
         (async () => {
           const badgeCount = await notificationService.getUnreadCount(userId);
-          await pushService.sendApnsPush(target.apnsToken!, title, body, 'NEW_QUESTION', badgeCount);
+          await pushService.sendApnsPush(target.apnsToken!, title, body, 'NEW_QUESTION', badgeCount, target.apnsEnvironment);
         })().catch((e) => {
           console.warn('[Scheduler] APNs 푸시 실패:', e);
         })
