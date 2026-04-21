@@ -97,7 +97,7 @@ export class AnswerService {
 
       const otherMembers = await prisma.user.findMany({
         where: { familyId: user.familyId, id: { not: user.id } },
-        select: { id: true, apnsToken: true, fcmToken: true, locale: true, notifAnswer: true },
+        select: { id: true, apnsToken: true, apnsEnvironment: true, fcmToken: true, locale: true, notifAnswer: true },
       });
 
       // Lambda에서는 fire-and-forget 패턴이 안 됨 — 핸들러가 응답하면 runtime이 frozen 처리되어
@@ -129,7 +129,7 @@ export class AnswerService {
           pushTasks.push(
             (async () => {
               const badgeCount = await notificationService.getUnreadCount(member.id);
-              await pushService.sendApnsPush(member.apnsToken!, title, body, 'MEMBER_ANSWERED', badgeCount);
+              await pushService.sendApnsPush(member.apnsToken!, title, body, 'MEMBER_ANSWERED', badgeCount, member.apnsEnvironment);
             })().catch((e) => {
               console.warn('[Answer] APNs 푸시 실패:', e);
             })

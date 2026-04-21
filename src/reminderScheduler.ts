@@ -74,6 +74,7 @@ export async function sendDailyReminders(): Promise<void> {
         select: {
           id: true,
           apnsToken: true,
+          apnsEnvironment: true,
           fcmToken: true,
           locale: true,
           notifQuestion: true,
@@ -199,7 +200,8 @@ export async function sendDailyReminders(): Promise<void> {
             title,
             body,
             'REMINDER',
-            badgeCount
+            badgeCount,
+            user.apnsEnvironment
           );
         })().catch((e) => {
           console.warn('[Reminder] APNs 푸시 실패:', e);

@@ -75,14 +75,23 @@ export class PushNotificationService {
     }
   }
 
-  /** APNs 푸시 알림 범용 발송 */
-  async sendApnsPush(deviceToken: string, title: string, body: string, type: string, badgeCount?: number): Promise<void> {
+  /** APNs 푸시 알림 범용 발송.
+   * environment: 'sandbox' | 'production' — 유저 레코드에 저장된 값을 그대로 전달.
+   * 미지정(undefined/null) 시 서버의 NODE_ENV 기반 fallback을 사용. (MG-22) */
+  async sendApnsPush(
+    deviceToken: string,
+    title: string,
+    body: string,
+    type: string,
+    badgeCount?: number,
+    environment?: 'sandbox' | 'production' | null
+  ): Promise<void> {
     if (!this.keyId || !this.teamId || !this.bundleId || !this.rawKey) return;
     const payload = JSON.stringify({
       aps: { alert: { title, body }, sound: 'default', badge: badgeCount ?? 1 },
       type,
     });
-    return this._sendApnsPayload(deviceToken, payload);
+    return this._sendApnsPayload(deviceToken, payload, environment);
   }
 
   /**
@@ -97,7 +106,13 @@ export class PushNotificationService {
    *   - isProduction: 서버가 스스로 production으로 판단했는지
    *   - skipped: 환경변수 미설정으로 발송 자체를 못한 경우
    */
-  async sendApnsPushDiagnostic(deviceToken: string, title: string, body: string, type: string): Promise<{
+  async sendApnsPushDiagnostic(
+    deviceToken: string,
+    title: string,
+    body: string,
+    type: string,
+    environment?: 'sandbox' | 'production' | null
+  ): Promise<{
     ok: boolean;
     status?: number;
     body?: string;
@@ -106,20 +121,21 @@ export class PushNotificationService {
     skipped?: boolean;
     error?: string;
   }> {
+    const isProduction = environment ? environment === 'production' : this.isProduction;
     if (!this.keyId || !this.teamId || !this.bundleId || !this.rawKey) {
-      return { ok: false, isProduction: this.isProduction, skipped: true, error: 'APNs env vars not set' };
+      return { ok: false, isProduction, skipped: true, error: 'APNs env vars not set' };
     }
     const payload = JSON.stringify({
       aps: { alert: { title, body }, sound: 'default', badge: 1 },
       type,
     });
-    const host = this.isProduction ? 'api.push.apple.com' : 'api.sandbox.push.apple.com';
+    const host = isProduction ? 'api.push.apple.com' : 'api.sandbox.push.apple.com';
     return new Promise((resolve) => {
       try {
         const client = http2.connect(`https://${host}`, { rejectUnauthorized: true });
         client.on('error', (e) => {
           client.destroy();
-          resolve({ ok: false, host, isProduction: this.isProduction, error: `connect error: ${String(e)}` });
+          resolve({ ok: false, host, isProduction, error: `connect error: ${String(e)}` });
         });
         const headers: http2.OutgoingHttpHeaders = {
           ':method': 'POST',
@@ -141,37 +157,48 @@ export class PushNotificationService {
         req.on('data', (chunk: Buffer) => { respBody += chunk.toString(); });
         req.on('end', () => {
           client.close();
-          resolve({ ok: status === 200, status, body: respBody, host, isProduction: this.isProduction });
+          resolve({ ok: status === 200, status, body: respBody, host, isProduction });
         });
         req.on('error', (e) => {
           client.destroy();
-          resolve({ ok: false, status, body: respBody, host, isProduction: this.isProduction, error: `request error: ${String(e)}` });
+          resolve({ ok: false, status, body: respBody, host, isProduction, error: `request error: ${String(e)}` });
         });
         req.write(payload);
         req.end();
       } catch (e) {
-        resolve({ ok: false, host, isProduction: this.isProduction, error: `exception: ${String(e)}` });
+        resolve({ ok: false, host, isProduction, error: `exception: ${String(e)}` });
       }
     });
   }
 
   /** 재촉하기 푸시 알림 발송 */
-  async sendNudgePush(deviceToken: string, senderName: string, badgeCount?: number): Promise<void> {
+  async sendNudgePush(
+    deviceToken: string,
+    senderName: string,
+    badgeCount?: number,
+    environment?: 'sandbox' | 'production' | null
+  ): Promise<void> {
     const payload = JSON.stringify({
       aps: { alert: { title: '재촉하기 알림', body: `${senderName}님이 오늘의 질문에 답변해달라고 합니다` }, sound: 'default', badge: badgeCount ?? 1 },
       type: 'ANSWER_REQUEST',
     });
-    return this._sendApnsPayload(deviceToken, payload);
+    return this._sendApnsPayload(deviceToken, payload, environment);
   }
 
-  /** APNs HTTP/2 공통 발송 */
-  private _sendApnsPayload(deviceToken: string, payload: string): Promise<void> {
+  /** APNs HTTP/2 공통 발송.
+   * environment 지정 시 토큰별로 sandbox/production 호스트 선택. 미지정 시 서버 NODE_ENV fallback. (MG-22) */
+  private _sendApnsPayload(
+    deviceToken: string,
+    payload: string,
+    environment?: 'sandbox' | 'production' | null
+  ): Promise<void> {
     if (!this.keyId || !this.teamId || !this.bundleId || !this.rawKey) {
       console.warn('[APNs] 환경변수 미설정 — 푸시 발송 건너뜀 (APNS_KEY_ID/TEAM_ID/BUNDLE_ID/PRIVATE_KEY)');
       return Promise.resolve();
     }
 
-    const host = this.isProduction ? 'api.push.apple.com' : 'api.sandbox.push.apple.com';
+    const isProduction = environment ? environment === 'production' : this.isProduction;
+    const host = isProduction ? 'api.push.apple.com' : 'api.sandbox.push.apple.com';
 
     return new Promise<void>((resolve) => {
       try {
@@ -225,7 +252,7 @@ export class PushNotificationService {
     const prisma = (await import('../utils/prisma')).default;
     const result = await prisma.user.updateMany({
       where: { apnsToken: token },
-      data: { apnsToken: null },
+      data: { apnsToken: null, apnsEnvironment: null },
     });
     if (result.count > 0) {
       console.warn(`[APNs] 만료 토큰 정리 완료 — ${result.count}명의 토큰 제거 (token=${token.substring(0, 8)}...)`);

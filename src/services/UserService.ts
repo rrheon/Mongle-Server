@@ -217,7 +217,7 @@ export class UserService {
    * APNs 디바이스 토큰 저장/갱신
    * 동일 토큰을 보유한 다른 유저가 있으면 해당 유저의 토큰을 null 처리 (중복 푸시 방지)
    */
-  async registerDeviceToken(userId: string, token: string): Promise<void> {
+  async registerDeviceToken(userId: string, token: string, environment?: 'sandbox' | 'production'): Promise<void> {
     if (!token) throw Errors.badRequest('디바이스 토큰이 비어 있습니다.');
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) throw Errors.notFound('사용자');
@@ -225,10 +225,14 @@ export class UserService {
     // 동일 APNs 토큰을 가진 다른 유저의 토큰 제거 (디바이스 1대 = 토큰 1개 원칙)
     await prisma.user.updateMany({
       where: { apnsToken: token, id: { not: user.id } },
-      data: { apnsToken: null },
+      data: { apnsToken: null, apnsEnvironment: null },
     });
 
-    await prisma.user.update({ where: { id: user.id }, data: { apnsToken: token } });
+    // environment 미지정 시(구형 클라이언트) production 가정 — v1 배포 유저의 하위호환 경로.
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { apnsToken: token, apnsEnvironment: environment ?? 'production' },
+    });
   }
 
   /**
