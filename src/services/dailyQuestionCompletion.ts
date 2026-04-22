@@ -6,15 +6,18 @@ function isSameDate(a: Date | null | undefined, b: Date | null | undefined): boo
 }
 
 /**
- * 해당 DailyQuestion이 "그룹 전원이 답변 또는 패스 완료" 상태인지 확인하고 로깅한다.
+ * 해당 DailyQuestion이 "그룹 전원이 답변 또는 패스 완료" 상태인지 확인하고
+ * 완료 시각(completedAt)을 기록한다.
  *
- * MG-16 이전: 완료 시 DQ.date 를 오늘로 이동시켜 history/스케줄러 정렬에 활용했음.
- * MG-16 이후: "전원 답변 → 다음 11시 새 질문 발행" 룰을 위해 같은 날 두 개의 DQ가
- * 필요해졌고, @@unique([familyId, date]) 충돌을 피하려면 date 가 배정일로 고정돼야 함.
- * 따라서 date 이동은 더 이상 수행하지 않는다. 완료 여부 판정은 호출 측에서 런타임으로
- * (isQuestionCompleted/스케줄러) 수행한다.
+ * 히스토리 노출일 정책:
+ *   - DQ.date 는 배정일로 고정 (unique 제약: @@unique([familyId, date]))
+ *   - DQ.completedAt 는 "그룹 전원 완료" 순간 기록 (nullable)
+ *   - 히스토리 UI 는 completedAt ?? date 로 노출일 결정
+ *   예) 20일 배정 → 21일 마지막 답변 → completedAt=21일 → 히스토리는 21일
  *
- * 멱등성: 여러 번 호출돼도 안전 (DB 변경 없음).
+ * 멱등성:
+ *   - completedAt 이 이미 설정된 경우 덮어쓰지 않음
+ *   - 전원 완료 상태가 아니면 아무 것도 하지 않음
  */
 export async function tryFinalizeDailyQuestion(params: {
   familyId: string;
@@ -24,9 +27,10 @@ export async function tryFinalizeDailyQuestion(params: {
 
   const dq = await prisma.dailyQuestion.findUnique({
     where: { id: dailyQuestionId },
-    select: { id: true, date: true, questionId: true, familyId: true },
+    select: { id: true, date: true, questionId: true, familyId: true, completedAt: true },
   });
   if (!dq || dq.familyId !== familyId) return;
+  if (dq.completedAt) return; // 이미 완료 처리됨
 
   const memberships = await prisma.familyMembership.findMany({
     where: { familyId },
@@ -48,7 +52,13 @@ export async function tryFinalizeDailyQuestion(params: {
   );
   if (!allCompleted) return;
 
+  const now = new Date();
+  await prisma.dailyQuestion.update({
+    where: { id: dq.id },
+    data: { completedAt: now },
+  });
+
   console.log(
-    `[DQ Finalize] family=${familyId} dq=${dq.id} date=${dq.date.toISOString().split('T')[0]} 전원 완료`
+    `[DQ Finalize] family=${familyId} dq=${dq.id} assigned=${dq.date.toISOString().split('T')[0]} completedAt=${now.toISOString()}`
   );
 }

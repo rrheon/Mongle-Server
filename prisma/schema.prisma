@@ -102,16 +102,20 @@ model Question {
 }
 
 model DailyQuestion {
-  id         String    @id @default(uuid())
-  questionId String    @map("question_id")
-  familyId   String    @map("family_id")
-  date       DateTime  @db.Date
-  isSkipped  Boolean   @default(false) @map("is_skipped")
-  skippedAt  DateTime? @map("skipped_at")
-  family     Family    @relation(fields: [familyId], references: [id])
-  question   Question  @relation(fields: [questionId], references: [id])
+  id          String    @id @default(uuid())
+  questionId  String    @map("question_id")
+  familyId    String    @map("family_id")
+  date        DateTime  @db.Date
+  isSkipped   Boolean   @default(false) @map("is_skipped")
+  skippedAt   DateTime? @map("skipped_at")
+  // 그룹 전원이 답변/패스를 완료한 순간(UTC). null 이면 아직 미완료.
+  // 히스토리는 "완료일자" 기준으로 노출: 20일 배정 + 21일 완료 → 21일에 표시.
+  completedAt DateTime? @map("completed_at")
+  family      Family    @relation(fields: [familyId], references: [id])
+  question    Question  @relation(fields: [questionId], references: [id])
 
   @@unique([familyId, date])
+  @@index([familyId, completedAt])
   @@map("daily_questions")
 }
 

@@ -85,8 +85,8 @@ export class QuestionService {
    * 답변이 history 에서 사라지는 버그가 있었다.
    *
    * 이제는 해당 questionId 에 대한 그룹 멤버의 답변을 시간 제한 없이 집계하고,
-   * 완료된 시점에 tryFinalizeDailyQuestion() 이 DailyQuestion.date 를 완료일자로
-   * 이동시키는 방식으로 처리한다.
+   * 완료된 시점에 tryFinalizeDailyQuestion() 이 DailyQuestion.completedAt 을 기록하는
+   * 방식으로 처리한다. DQ.date 는 배정일로 고정(@@unique 충돌 방지).
    */
   private async isQuestionCompleted(familyId: string, questionId: string, date: Date): Promise<boolean> {
     const memberships = await prisma.familyMembership.findMany({
@@ -260,6 +260,9 @@ export class QuestionService {
     );
 
     // dailyQuestion + question + 해당 질문의 가족 답변을 한 번에 조회 (N+1 제거)
+    // 히스토리 정렬: completedAt 있으면 우선 (완료일자 기준), 없으면 date 폴백.
+    // Prisma 는 COALESCE orderBy 를 직접 지원하지 않으므로 [completedAt desc nulls last, date desc]
+    // 조합으로 근사한다 — 완료된 질문은 완료일자 내림차순, 미완료 질문은 뒤에서 배정일 내림차순.
     const [dailyQuestions, total] = await Promise.all([
       prisma.dailyQuestion.findMany({
         where: { familyId: user.familyId, date: { lte: today } },
@@ -273,7 +276,10 @@ export class QuestionService {
             },
           },
         },
-        orderBy: { date: 'desc' },
+        orderBy: [
+          { completedAt: { sort: 'desc', nulls: 'last' } },
+          { date: 'desc' },
+        ],
         skip,
         take: limit,
       }),
@@ -318,10 +324,19 @@ export class QuestionService {
         };
       });
 
+      // 히스토리 노출일: 완료 시점 기준 (KST). 미완료 질문은 배정일(date) 폴백.
+      // 예) 20일 배정 → 21일 모든 멤버 답변 완료 → 히스토리에서 21일로 노출.
+      // completedAt 은 UTC 타임스탬프이므로 KST 변환 헬퍼 사용 (split('T') 금지).
+      const displayDate = dq.completedAt
+        ? this.toKstDateString(dq.completedAt)
+        : this.toKstDateString(dq.date);
+
       return {
         id: dq.id,
         question: this.toQuestionResponse(dq.question, lang),
-        date: dq.date.toISOString().split('T')[0],
+        date: displayDate,
+        assignedDate: this.toKstDateString(dq.date),
+        completedAt: dq.completedAt?.toISOString() ?? null,
         familyId: dq.familyId,
         isSkipped: dq.isSkipped,
         skippedAt: dq.skippedAt?.toISOString() ?? null,
@@ -485,6 +500,17 @@ export class QuestionService {
     const kstDateStr = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' }); // "YYYY-MM-DD"
     // Prisma @db.Date는 UTC 기준으로 날짜를 저장하므로, KST 날짜를 UTC 자정으로 생성
     return new Date(kstDateStr + 'T00:00:00.000Z');
+  }
+
+  /**
+   * Date → "YYYY-MM-DD" (KST 기준).
+   *
+   * `toISOString().split('T')[0]` 은 UTC 기준이라 KST 새벽(00:00~09:00)에 찍힌
+   * `completedAt` 이 하루 앞당겨 표시되는 off-by-one 이 발생한다.
+   * 히스토리 노출일 같은 KST 사용자 시점의 달력 배치에는 반드시 이 헬퍼를 사용한다.
+   */
+  private toKstDateString(date: Date): string {
+    return date.toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
   }
 
   /**

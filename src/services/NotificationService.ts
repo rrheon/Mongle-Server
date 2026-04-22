@@ -16,12 +16,12 @@ export interface NotificationDTO {
 
 export class NotificationService {
 
-  async getNotifications(authUserId: string, limit = 50): Promise<NotificationDTO[]> {
+  async getNotifications(authUserId: string, limit = 50, familyId?: string): Promise<NotificationDTO[]> {
     // authUserId는 JWT의 OAuth userId (예: "kakao:xxx"), Notification.userId는 User.id(UUID) FK
     const user = await prisma.user.findUnique({ where: { userId: authUserId } });
     if (!user) return [];
     const items = await prisma.notification.findMany({
-      where: { userId: user.id },
+      where: { userId: user.id, ...(familyId ? { familyId } : {}) },
       orderBy: { createdAt: 'desc' },
       take: limit,
     });
@@ -41,11 +41,11 @@ export class NotificationService {
     return this.toDTO(updated);
   }
 
-  async markAllAsRead(authUserId: string): Promise<{ count: number }> {
+  async markAllAsRead(authUserId: string, familyId?: string): Promise<{ count: number }> {
     const user = await prisma.user.findUnique({ where: { userId: authUserId } });
     if (!user) return { count: 0 };
     const result = await prisma.notification.updateMany({
-      where: { userId: user.id, isRead: false },
+      where: { userId: user.id, isRead: false, ...(familyId ? { familyId } : {}) },
       data: { isRead: true },
     });
     return { count: result.count };
@@ -57,10 +57,12 @@ export class NotificationService {
     await prisma.notification.deleteMany({ where: { id: notificationId.toLowerCase(), userId: user.id } });
   }
 
-  async deleteAllNotifications(authUserId: string): Promise<{ count: number }> {
+  async deleteAllNotifications(authUserId: string, familyId?: string): Promise<{ count: number }> {
     const user = await prisma.user.findUnique({ where: { userId: authUserId } });
     if (!user) return { count: 0 };
-    const result = await prisma.notification.deleteMany({ where: { userId: user.id } });
+    const result = await prisma.notification.deleteMany({
+      where: { userId: user.id, ...(familyId ? { familyId } : {}) },
+    });
     return { count: result.count };
   }
 

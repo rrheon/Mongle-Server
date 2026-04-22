@@ -145,8 +145,8 @@ export class AnswerService {
       }
       await Promise.all(pushTasks);
 
-      // 그룹 전원이 이번 답변으로 완료되었다면 DailyQuestion.date 를 오늘(KST)로 이동
-      // → history 상 "완료일자" 기준으로 기록되도록
+      // 그룹 전원이 이번 답변으로 완료되었다면 DailyQuestion.completedAt 을 기록
+      // → history 상 "완료일자" 기준으로 노출 (20일 배정 + 21일 완료 → 21일에 기록)
       if (activeDailyQuestion) {
         try {
           await tryFinalizeDailyQuestion({
