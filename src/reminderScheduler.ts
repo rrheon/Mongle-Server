@@ -50,13 +50,14 @@ function isSameDate(a: Date | null | undefined, b: Date | null | undefined): boo
  * 수동 재촉(NudgeService → type ANSWER_REQUEST) 및 답변완료(MEMBER_ANSWERED) 경로는 변경 없음.
  */
 export async function sendDailyReminders(): Promise<void> {
-  const kstMidnight = getKstMidnightUtc();
-
   // 각 가족의 활성(가장 최근) DQ 1건만 후보로 선정.
   // Prisma distinct + orderBy 로 PostgreSQL DISTINCT ON (family_id) 유사 동작.
-  // where 에서 미래 DQ 제외(이론상 없지만 안전장치).
+  // 날짜 상한을 두지 않는 이유:
+  //   - DailyQuestion.date 는 @db.Date 라 DB 값이 `YYYY-MM-DD T00:00:00Z`(UTC 자정)
+  //   - getKstMidnightUtc() 는 "KST 자정의 UTC 시각" 이라 `YYYY-MM-DD-1 T15:00:00Z`
+  //   - 두 값을 lte 로 비교하면 **오늘 배정된 DQ 가 제외**되는 off-by-one 발생
+  //   - 미래 DQ 는 현재 발행 정책상 존재하지 않으므로 상한 불필요
   const candidateDQs = await prisma.dailyQuestion.findMany({
-    where: { date: { lte: kstMidnight } },
     distinct: ['familyId'],
     orderBy: [{ familyId: 'asc' }, { date: 'desc' }],
     select: { id: true, questionId: true, familyId: true, date: true },
