@@ -90,7 +90,15 @@ export interface QuestionResponse {
 export interface DailyQuestionResponse {
   id: string;
   question: QuestionResponse;
+  /**
+   * 히스토리 노출일. 완료 전에는 배정일(assignedDate)과 동일,
+   * 완료 후에는 completedAt(YYYY-MM-DD).
+   */
   date: string;
+  /** 질문 배정일 (YYYY-MM-DD). DQ 생성 시점 기준, 변하지 않음. */
+  assignedDate?: string;
+  /** 그룹 전원이 답변/패스 완료한 시각(ISO). 미완료면 null. */
+  completedAt?: string | null;
   familyId: string;
   isSkipped: boolean;
   skippedAt: string | null;

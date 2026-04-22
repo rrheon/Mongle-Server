@@ -28,9 +28,10 @@ export class NotificationController extends Controller {
   @SuccessResponse(200, '성공')
   public async getNotifications(
     @Request() req: AuthRequest,
-    @Query() limit: number = 50
+    @Query() limit: number = 50,
+    @Query() group_id?: string
   ): Promise<GetNotificationsResponse> {
-    const notifications = await this.notificationService.getNotifications(req.user.userId, limit);
+    const notifications = await this.notificationService.getNotifications(req.user.userId, limit, group_id);
     return { notifications };
   }
 
@@ -56,9 +57,10 @@ export class NotificationController extends Controller {
   @Security('jwt')
   @SuccessResponse(200, '성공')
   public async markAllAsRead(
-    @Request() req: AuthRequest
+    @Request() req: AuthRequest,
+    @Query() group_id?: string
   ): Promise<MarkAllReadResponse> {
-    return this.notificationService.markAllAsRead(req.user.userId);
+    return this.notificationService.markAllAsRead(req.user.userId, group_id);
   }
 
   /**
@@ -83,8 +85,9 @@ export class NotificationController extends Controller {
   @Security('jwt')
   @SuccessResponse(200, '삭제됨')
   public async deleteAllNotifications(
-    @Request() req: AuthRequest
+    @Request() req: AuthRequest,
+    @Query() group_id?: string
   ): Promise<DeleteCountResponse> {
-    return this.notificationService.deleteAllNotifications(req.user.userId);
+    return this.notificationService.deleteAllNotifications(req.user.userId, group_id);
   }
 }
