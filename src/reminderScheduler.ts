@@ -7,9 +7,7 @@ import { getPushMessages } from './utils/i18n/push';
 const notificationService = new NotificationService();
 const pushService = new PushNotificationService();
 
-export const REMINDER_WINDOW_DAYS = 7;
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * 현재 시점의 KST 자정을 UTC Date 로 반환.
@@ -34,9 +32,12 @@ function isSameDate(a: Date | null | undefined, b: Date | null | undefined): boo
  * MG-19: 저녁 7시 리마인더 알림 (KST 19:00 스케줄, type=REMINDER).
  *
  * 조건:
- *   - 최근 REMINDER_WINDOW_DAYS 이내 배정된 모든 DailyQuestion
- *   - 가족 내 미답변 멤버가 1명 이상일 때에만 해당 가족을 리마인드 대상으로 포함
- *   - 발송 대상은 **그룹 전원** (답변자 + 미답변자) — 클라이언트에서 type=REMINDER 로 라우팅
+ *   - 대상은 각 가족의 **현재 활성(가장 최근 배정) DailyQuestion 1개** — MG-16 의
+ *     carry-over 정책(자동교체 없음, 최신 DQ 무기한 유지)과 일관됨.
+ *     이전 버전(7일 윈도우)은 과거 미답변 질문까지 미답변자 문구로 묶여서 "오늘 그룹
+ *     전원 답변했는데 왜 답변 안 했다고 나오지?"라는 UX 혼란을 유발했다.
+ *   - 해당 활성 DQ 에서 미답변 멤버가 1명 이상일 때에만 리마인드 대상 가족으로 포함.
+ *   - 발송 대상은 **그룹 전원** (답변자 + 미답변자) — 클라이언트에서 type=REMINDER 로 라우팅.
  *   - 메시지 분기 (사용자별 해당 가족의 오늘 답변 여부 기준):
  *       · 답변자:   title "미답변자가 있어요" / body "그룹에 접속해서 재촉하기를 해봐요"
  *       · 미답변자: title "오늘 질문에 답변하지 않았어요" / body "그룹에 접속해서 답변을 달아봐요"
@@ -50,15 +51,18 @@ function isSameDate(a: Date | null | undefined, b: Date | null | undefined): boo
  */
 export async function sendDailyReminders(): Promise<void> {
   const kstMidnight = getKstMidnightUtc();
-  const windowStart = new Date(kstMidnight.getTime() - REMINDER_WINDOW_DAYS * DAY_MS);
 
+  // 각 가족의 활성(가장 최근) DQ 1건만 후보로 선정.
+  // Prisma distinct + orderBy 로 PostgreSQL DISTINCT ON (family_id) 유사 동작.
+  // where 에서 미래 DQ 제외(이론상 없지만 안전장치).
   const candidateDQs = await prisma.dailyQuestion.findMany({
-    where: { date: { gte: windowStart } },
-    orderBy: { date: 'desc' },
+    where: { date: { lte: kstMidnight } },
+    distinct: ['familyId'],
+    orderBy: [{ familyId: 'asc' }, { date: 'desc' }],
     select: { id: true, questionId: true, familyId: true, date: true },
   });
   if (candidateDQs.length === 0) {
-    console.log('[Reminder] No candidate questions in window');
+    console.log('[Reminder] No active DQs found');
     return;
   }
 
