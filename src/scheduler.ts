@@ -1,11 +1,8 @@
 import { ScheduledEvent, Context } from 'aws-lambda';
 import prisma from './utils/prisma';
-import { NotificationService } from './services/NotificationService';
-import { PushNotificationService } from './services/PushNotificationService';
-import { getPushMessages } from './utils/i18n/push';
+import { QuestionService, notifyNewQuestion } from './services/QuestionService';
 
-const notificationService = new NotificationService();
-const pushService = new PushNotificationService();
+const questionService = new QuestionService();
 
 // KST 기준 오늘 날짜를 UTC 자정으로 반환
 function getKstToday(): Date {
@@ -15,137 +12,71 @@ function getKstToday(): Date {
 }
 
 // 모든 가족에게 오늘의 질문 배정
+//
+// MG-16 적응형 스킵(전원 답변 안 된 가족은 건너뜀) 후, 적격 가족에게만
+// assignQuestionToFamily 를 호출한다. 알림/푸시는 assignQuestionToFamily 내부의
+// notifyNewQuestion 으로 처리되므로 스케줄러에서 별도 발송 로직을 두지 않는다.
+// (QuestionService/FamilyService 경로와 알림 일관성 유지)
 export async function assignDailyQuestions(): Promise<void> {
   const today = getKstToday();
   const families = await prisma.family.findMany({ select: { id: true } });
   let assigned = 0;
 
-  // 푸시 발송 대상을 유저 단위로 모아 중복 방지 (다중 그룹 소속 유저에게 1회만 발송)
-  const pushTargets = new Map<string, { apnsToken: string | null; apnsEnvironment: 'sandbox' | 'production' | null; fcmToken: string | null; locale: string | null; notifQuestion: boolean }>();
-  const dbNotifTasks: Promise<unknown>[] = [];
-
   for (const family of families) {
-    const existing = await prisma.dailyQuestion.findUnique({
-      where: { familyId_date: { familyId: family.id, date: today } },
-    });
-    if (existing) continue;
+    // 한 가족의 처리가 throw 해도 다른 가족은 영향받지 않게 격리.
+    try {
+      const existing = await prisma.dailyQuestion.findUnique({
+        where: { familyId_date: { familyId: family.id, date: today } },
+      });
+      if (existing) continue;
 
-    // MG-16: 자동교체 없음. 가장 최근 DQ가 미완료면 무한정 대기.
-    // 완료된 경우에만 새 질문 발급. 48h 자동 넘김 로직 제거.
-    const latestDQ = await prisma.dailyQuestion.findFirst({
-      where: { familyId: family.id, date: { lt: today } },
-      orderBy: { date: 'desc' },
-    });
-
-    if (latestDQ) {
-      const memberships = await prisma.familyMembership.findMany({
-        where: { familyId: family.id },
-        select: { userId: true, skippedDate: true },
+      // MG-16: 자동교체 없음. 가장 최근 DQ가 미완료면 무한정 대기.
+      const latestDQ = await prisma.dailyQuestion.findFirst({
+        where: { familyId: family.id, date: { lt: today } },
+        orderBy: { date: 'desc' },
       });
 
-      const answeredUserIds = new Set(
-        (await prisma.answer.findMany({
-          where: {
-            questionId: latestDQ.questionId,
-            userId: { in: memberships.map((m) => m.userId) },
-          },
-          select: { userId: true },
-        })).map((a) => a.userId)
-      );
-
-      const allCompleted = memberships.every(
-        (m) =>
-          answeredUserIds.has(m.userId) ||
-          (m.skippedDate !== null && m.skippedDate.getTime() === latestDQ.date.getTime())
-      );
-
-      if (!allCompleted) {
-        console.log(
-          `[Scheduler] Skipped family ${family.id}: previous question (${latestDQ.date.toISOString().split('T')[0]}) not completed`
-        );
-        continue;
-      }
-    }
-
-    const recentDate = new Date(today);
-    recentDate.setDate(recentDate.getDate() - 30);
-    const usedIds = (await prisma.dailyQuestion.findMany({
-      where: { familyId: family.id, date: { gte: recentDate } },
-      select: { questionId: true },
-    })).map(q => q.questionId);
-
-    let pool = await prisma.question.findMany({ where: { isActive: true, id: { notIn: usedIds } } });
-    if (pool.length === 0) {
-      pool = await prisma.question.findMany({ where: { isActive: true } });
-    }
-    if (pool.length === 0) continue;
-
-    const selected = pool[Math.floor(Math.random() * pool.length)];
-    await prisma.dailyQuestion.create({ data: { questionId: selected.id, familyId: family.id, date: today } });
-    assigned++;
-
-    // 가족 멤버 전원에게 DB 알림 저장 (그룹별 기록 유지) + 푸시 대상 수집
-    const members = await prisma.user.findMany({
-      where: { familyId: family.id },
-      select: { id: true, apnsToken: true, apnsEnvironment: true, fcmToken: true, locale: true, notifQuestion: true },
-    });
-    for (const member of members) {
-      const msgs = getPushMessages(member.locale);
-      const title = msgs.newQuestion.title;
-      const body = msgs.newQuestion.body;
-
-      // DB 알림은 그룹별로 생성 (앱 내 알림 목록에서 그룹 구분용)
-      dbNotifTasks.push(
-        notificationService.createNotification(member.id, 'NEW_QUESTION', title, body, family.id).catch((e) => {
-          console.warn('[Scheduler] 알림 저장 실패:', e);
-        })
-      );
-
-      // 푸시 대상은 유저 단위로 1회만 수집 (중복 방지)
-      if (!pushTargets.has(member.id)) {
-        pushTargets.set(member.id, {
-          apnsToken: member.apnsToken,
-          apnsEnvironment: member.apnsEnvironment,
-          fcmToken: member.fcmToken,
-          locale: member.locale,
-          notifQuestion: member.notifQuestion,
+      if (latestDQ) {
+        const memberships = await prisma.familyMembership.findMany({
+          where: { familyId: family.id },
+          select: { userId: true, skippedDate: true },
         });
+
+        const answeredUserIds = new Set(
+          (
+            await prisma.answer.findMany({
+              where: {
+                questionId: latestDQ.questionId,
+                userId: { in: memberships.map((m) => m.userId) },
+              },
+              select: { userId: true },
+            })
+          ).map((a) => a.userId)
+        );
+
+        const allCompleted = memberships.every(
+          (m) =>
+            answeredUserIds.has(m.userId) ||
+            (m.skippedDate !== null && m.skippedDate.getTime() === latestDQ.date.getTime())
+        );
+
+        if (!allCompleted) {
+          console.log(
+            `[Scheduler] Skipped family ${family.id}: previous question (${latestDQ.date.toISOString().split('T')[0]}) not completed`
+          );
+          continue;
+        }
       }
+
+      // DQ 생성 + NEW_QUESTION 알림 + 푸시는 assignQuestionToFamily 가 한 번에 처리.
+      await questionService.assignQuestionToFamily(family.id, today);
+      assigned++;
+    } catch (e) {
+      console.error(`[Scheduler] family ${family.id} 처리 실패 — 다음 가족 계속:`, e);
     }
   }
 
-  // DB 알림 저장 (그룹별) 실행
-  await Promise.all(dbNotifTasks);
-
-  // 푸시 발송 — 유저당 1회만 (다중 그룹이어도 단일 푸시)
-  const pushTasks: Promise<unknown>[] = [];
-  for (const [userId, target] of pushTargets) {
-    if (!target.notifQuestion) continue;
-    const msgs = getPushMessages(target.locale);
-    const title = msgs.newQuestion.title;
-    const body = msgs.newQuestion.body;
-
-    if (target.apnsToken) {
-      pushTasks.push(
-        (async () => {
-          const badgeCount = await notificationService.getUnreadCount(userId);
-          await pushService.sendApnsPush(target.apnsToken!, title, body, 'NEW_QUESTION', badgeCount, target.apnsEnvironment);
-        })().catch((e) => {
-          console.warn('[Scheduler] APNs 푸시 실패:', e);
-        })
-      );
-    }
-    if (target.fcmToken) {
-      pushTasks.push(
-        pushService.sendFcmPush(target.fcmToken, title, body, 'NEW_QUESTION').catch((e) => {
-          console.warn('[Scheduler] FCM 푸시 실패:', e);
-        })
-      );
-    }
-  }
-  await Promise.all(pushTasks);
-
-  console.log(`[Scheduler] Assigned daily questions to ${assigned} families, pushed to ${pushTargets.size} unique users`);
+  console.log(`[Scheduler] Assigned daily questions to ${assigned} families`);
 }
 
 // EventBridge Lambda 핸들러
@@ -157,3 +88,7 @@ export const handler = async (_event: ScheduledEvent, _context: Context): Promis
     throw err;
   }
 };
+
+// notifyNewQuestion 을 export (기존 임포트 호환을 위해) — 현재 이 파일 밖 호출처 없지만
+// 백필 스크립트 등에서 공용으로 쓸 가능성 대비.
+export { notifyNewQuestion };

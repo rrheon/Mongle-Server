@@ -10,6 +10,9 @@ import {
 } from '../models';
 import { Errors } from '../middleware/errorHandler';
 import { tryFinalizeDailyQuestion } from './dailyQuestionCompletion';
+import { NotificationService } from './NotificationService';
+import { PushNotificationService } from './PushNotificationService';
+import { getPushMessages } from '../utils/i18n/push';
 
 export class QuestionService {
   /**
@@ -436,6 +439,11 @@ export class QuestionService {
   /**
    * 가족에게 질문 배정 (최근 30일 제외).
    * MG-16: 가족 생성 직후 첫 질문 발급에도 사용되므로 public.
+   *
+   * DQ 생성 후 가족 멤버 전원에게 NEW_QUESTION DB 알림 + APNs/FCM 푸시 발송.
+   * 스케줄러/FamilyService/getTodayQuestion 어느 경로로 들어와도 알림이 누락되지 않도록
+   * 단일 진입점에서 처리. 알림/푸시 실패는 best-effort 로 삼키고 DQ 반환은 계속한다
+   * (가족 생성 흐름이 푸시 실패로 끊기면 UX 더 나빠짐).
    */
   async assignQuestionToFamily(familyId: string, date: Date) {
     const recentDate = new Date(date);
@@ -459,10 +467,16 @@ export class QuestionService {
 
     const selected = questionPool[Math.floor(Math.random() * questionPool.length)];
 
-    return prisma.dailyQuestion.create({
+    const created = await prisma.dailyQuestion.create({
       data: { questionId: selected.id, familyId, date },
       include: { question: true },
     });
+
+    await notifyNewQuestion(familyId).catch((e) => {
+      console.warn(`[QuestionService] NEW_QUESTION 알림 실패 family=${familyId}:`, e);
+    });
+
+    return created;
   }
 
   private getToday(): Date {
@@ -571,3 +585,63 @@ export class QuestionService {
     };
   }
 }
+
+/**
+ * 가족 멤버 전원에게 NEW_QUESTION DB 알림 저장 + APNs/FCM 푸시 발송.
+ *
+ * scheduler.ts 와 QuestionService.assignQuestionToFamily 가 공유하는 로직.
+ * 개별 멤버/채널 실패는 로그만 남기고 삼켜, 한 유저 실패가 다른 유저 발송을 막지 않음.
+ * 호출처는 이 함수 자체의 throw 에 대비해 상위에서 catch 권장.
+ */
+async function notifyNewQuestion(familyId: string): Promise<void> {
+  const notifSvc = new NotificationService();
+  const pushSvc = new PushNotificationService();
+
+  const members = await prisma.user.findMany({
+    where: { familyId },
+    select: {
+      id: true,
+      apnsToken: true,
+      apnsEnvironment: true,
+      fcmToken: true,
+      locale: true,
+      notifQuestion: true,
+    },
+  });
+
+  const tasks: Promise<unknown>[] = [];
+  for (const m of members) {
+    const msgs = getPushMessages(m.locale);
+    const title = msgs.newQuestion.title;
+    const body = msgs.newQuestion.body;
+
+    tasks.push(
+      notifSvc.createNotification(m.id, 'NEW_QUESTION', title, body, familyId).catch((e) => {
+        console.warn(`[notifyNewQuestion] DB 알림 실패 user=${m.id} family=${familyId}:`, e);
+      })
+    );
+
+    if (!m.notifQuestion) continue;
+
+    if (m.apnsToken) {
+      tasks.push(
+        (async () => {
+          const badge = await notifSvc.getUnreadCount(m.id);
+          await pushSvc.sendApnsPush(m.apnsToken!, title, body, 'NEW_QUESTION', badge, m.apnsEnvironment);
+        })().catch((e) => {
+          console.warn(`[notifyNewQuestion] APNs 실패 user=${m.id}:`, e);
+        })
+      );
+    }
+    if (m.fcmToken) {
+      tasks.push(
+        pushSvc.sendFcmPush(m.fcmToken, title, body, 'NEW_QUESTION').catch((e) => {
+          console.warn(`[notifyNewQuestion] FCM 실패 user=${m.id}:`, e);
+        })
+      );
+    }
+  }
+  await Promise.all(tasks);
+}
+
+export { notifyNewQuestion };
