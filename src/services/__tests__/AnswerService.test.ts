@@ -120,7 +120,8 @@ const mockAnswerWithUser = {
 function setupCreateAnswerSuccessPath() {
   mockPrismaDailyQuestionFindFirst.mockResolvedValue({ id: 'daily-q-id' });
   mockPrismaFamilyMembershipFindUnique.mockResolvedValue({ nickname: null, colorId: 'loved' });
-  mockPrismaUserFindMany.mockResolvedValue([]); // 다른 가족 멤버 없음 → 알림/푸시 루프 생략
+  // MG-29: prisma.user.findMany → familyMembership.findMany 로 변경됨. 빈 멤버십 = 알림/푸시 루프 생략.
+  mockPrismaFamilyMembershipFindMany.mockResolvedValueOnce([]);
 }
 
 describe('AnswerService.createAnswer', () => {

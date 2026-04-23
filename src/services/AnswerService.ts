@@ -95,10 +95,18 @@ export class AnswerService {
       const senderNickname = senderMembership?.nickname ?? user.name;
       const senderColorId = senderMembership?.colorId ?? data.moodId ?? 'loved';
 
-      const otherMembers = await prisma.user.findMany({
-        where: { familyId: user.familyId, id: { not: user.id } },
-        select: { id: true, apnsToken: true, apnsEnvironment: true, fcmToken: true, locale: true, notifAnswer: true },
+      // FamilyMembership 기반 조회 — User.familyId 는 "현재 활성 가족" 1개만 가리키므로,
+      // 멤버가 다른 그룹을 활성으로 두면 매칭 0건이 되어 MEMBER_ANSWERED 알림이 누락되던
+      // 버그(MG-29) 수정. 본인 제외는 userId 비교로 처리.
+      const otherMemberships = await prisma.familyMembership.findMany({
+        where: { familyId: user.familyId, userId: { not: user.id } },
+        select: {
+          user: {
+            select: { id: true, apnsToken: true, apnsEnvironment: true, fcmToken: true, locale: true, notifAnswer: true },
+          },
+        },
       });
+      const otherMembers = otherMemberships.map((m) => m.user);
 
       // Lambda에서는 fire-and-forget 패턴이 안 됨 — 핸들러가 응답하면 runtime이 frozen 처리되어
       // 백그라운드 HTTP/2 APNs 연결이 중단됨. 모든 푸시 작업을 await 처리.

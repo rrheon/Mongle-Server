@@ -51,6 +51,23 @@ jest.mock('../../utils/prisma', () => ({
   },
 }));
 
+const mockCreateNotification = jest.fn();
+const mockGetUnreadCount = jest.fn().mockResolvedValue(0);
+const mockSendApnsPush = jest.fn().mockResolvedValue(undefined);
+const mockSendFcmPush = jest.fn().mockResolvedValue(undefined);
+jest.mock('../NotificationService', () => ({
+  NotificationService: jest.fn().mockImplementation(() => ({
+    createNotification: mockCreateNotification,
+    getUnreadCount: mockGetUnreadCount,
+  })),
+}));
+jest.mock('../PushNotificationService', () => ({
+  PushNotificationService: jest.fn().mockImplementation(() => ({
+    sendApnsPush: mockSendApnsPush,
+    sendFcmPush: mockSendFcmPush,
+  })),
+}));
+
 import { QuestionService } from '../QuestionService';
 
 const service = new QuestionService();
@@ -283,6 +300,40 @@ describe('QuestionService.createCustomQuestion', () => {
         data: { hearts: { decrement: 3 } },
       })
     );
+  });
+});
+
+describe('notifyNewQuestion (MG-29 회귀)', () => {
+  beforeEach(() => {
+    mockCreateNotification.mockReset().mockResolvedValue(undefined);
+    mockSendApnsPush.mockClear();
+    mockSendFcmPush.mockClear();
+    mockPrismaUserFindMany.mockClear();
+    mockPrismaFamilyMembershipFindMany.mockReset();
+  });
+
+  it('FamilyMembership 기반으로 멤버를 조회한다 — User.familyId 단일 컬럼 조회 회귀 방지', async () => {
+    // 가족 family-A 의 멤버 2명. 한 명(u2)은 활성 가족이 다른 그룹(B) 이지만
+    // family-A 의 FamilyMembership 행은 존재하므로 알림 대상에 포함되어야 한다.
+    mockPrismaFamilyMembershipFindMany.mockResolvedValueOnce([
+      { user: { id: 'u1', apnsToken: 'tok-a', apnsEnvironment: 'sandbox', fcmToken: null, locale: 'ko', notifQuestion: true } },
+      { user: { id: 'u2', apnsToken: 'tok-b', apnsEnvironment: 'production', fcmToken: null, locale: 'ko', notifQuestion: true } },
+    ]);
+
+    const { notifyNewQuestion } = await import('../QuestionService');
+    await notifyNewQuestion('family-A');
+
+    // 잘못된 단일 컬럼 조회 경로가 다시 들어오지 않았는지 (회귀 방지의 핵심)
+    expect(mockPrismaUserFindMany).not.toHaveBeenCalled();
+
+    // 올바른 N:M 조회가 호출됐는지
+    expect(mockPrismaFamilyMembershipFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { familyId: 'family-A' } })
+    );
+
+    // 멤버 2명 모두에게 인앱 알림 + APNs 푸시 발송됐는지
+    expect(mockCreateNotification).toHaveBeenCalledTimes(2);
+    expect(mockSendApnsPush).toHaveBeenCalledTimes(2);
   });
 });
 
