@@ -623,17 +623,25 @@ async function notifyNewQuestion(familyId: string): Promise<void> {
   const notifSvc = new NotificationService();
   const pushSvc = new PushNotificationService();
 
-  const members = await prisma.user.findMany({
+  // FamilyMembership 기반 조회 — User.familyId 단일 컬럼은 유저의 "현재 활성 가족" 1개만
+  // 가리키므로, 멤버가 다른 그룹을 활성으로 두면 매칭 0건이 되어 알림이 누락되던 버그(MG-29)
+  // 수정. 스케줄러(scheduler.ts)·리마인더(reminderScheduler.ts)와 동일한 N:M 진실 사용.
+  const memberships = await prisma.familyMembership.findMany({
     where: { familyId },
     select: {
-      id: true,
-      apnsToken: true,
-      apnsEnvironment: true,
-      fcmToken: true,
-      locale: true,
-      notifQuestion: true,
+      user: {
+        select: {
+          id: true,
+          apnsToken: true,
+          apnsEnvironment: true,
+          fcmToken: true,
+          locale: true,
+          notifQuestion: true,
+        },
+      },
     },
   });
+  const members = memberships.map((m) => m.user);
 
   const tasks: Promise<unknown>[] = [];
   for (const m of members) {
