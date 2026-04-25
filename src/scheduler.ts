@@ -1,15 +1,9 @@
 import { ScheduledEvent, Context } from 'aws-lambda';
 import prisma from './utils/prisma';
 import { QuestionService, notifyNewQuestion } from './services/QuestionService';
+import { getKstToday, isSameKstDate } from './utils/kst';
 
 const questionService = new QuestionService();
-
-// KST 기준 오늘 날짜를 UTC 자정으로 반환
-function getKstToday(): Date {
-  const now = new Date();
-  const kstDateStr = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
-  return new Date(kstDateStr + 'T00:00:00.000Z');
-}
 
 // 모든 가족에게 오늘의 질문 배정
 //
@@ -54,10 +48,13 @@ export async function assignDailyQuestions(): Promise<void> {
           ).map((a) => a.userId)
         );
 
+        // skippedDate 와 dq.date 는 둘 다 @db.Date 지만 timezone offset 에 따라
+        // getTime() 이 다르게 찍히는 케이스가 있어 (RDS 내부 normalization 차이),
+        // ISO 일자 문자열 비교로 통일. dailyQuestionCompletion / QuestionService 와 동일.
         const allCompleted = memberships.every(
           (m) =>
             answeredUserIds.has(m.userId) ||
-            (m.skippedDate !== null && m.skippedDate.getTime() === latestDQ.date.getTime())
+            isSameKstDate(m.skippedDate, latestDQ.date)
         );
 
         if (!allCompleted) {

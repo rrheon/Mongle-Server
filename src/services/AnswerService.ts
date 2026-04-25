@@ -317,7 +317,21 @@ export class AnswerService {
       throw Errors.forbidden('본인의 답변만 수정할 수 있습니다.');
     }
 
-    // 답변 수정 + 하트 차감 + colorId 업데이트를 원자적으로 처리
+    // 하트 잔액 사전 검사 — decrement 무조건 실행 시 음수 가능. 정책상 0 이하는 차단.
+    // 가족 소속 X 인 경우 하트 정책 자체를 적용 안 함.
+    if (user.familyId) {
+      const membership = await prisma.familyMembership.findUnique({
+        where: { userId_familyId: { userId: user.id, familyId: user.familyId } },
+        select: { hearts: true },
+      });
+      if (!membership || membership.hearts < 1) {
+        throw Errors.badRequest('하트가 부족합니다. 답변 수정에는 하트 1개가 필요합니다.');
+      }
+    }
+
+    // 답변 수정 + 하트 차감 + colorId 업데이트를 원자적으로 처리.
+    // hearts >= 1 조건을 updateMany where 에 명시해 위 사전 검사와 트랜잭션 사이의
+    // race (동시 다른 클라가 차감) 도 차단. count 0 이면 부족 에러로 환원.
     const updateOps: any[] = [
       prisma.answer.update({
         where: { id: normalizedAnswerId },
@@ -330,11 +344,14 @@ export class AnswerService {
       }),
     ];
 
-    // 하트 1개 차감 (가족 소속인 경우)
     if (user.familyId) {
       updateOps.push(
         prisma.familyMembership.updateMany({
-          where: { userId: user.id, familyId: user.familyId },
+          where: {
+            userId: user.id,
+            familyId: user.familyId,
+            hearts: { gte: 1 },
+          },
           data: {
             hearts: { decrement: 1 },
             ...(data.moodId && { colorId: data.moodId }),
@@ -343,7 +360,14 @@ export class AnswerService {
       );
     }
 
-    const [updated] = await prisma.$transaction(updateOps);
+    const result = await prisma.$transaction(updateOps);
+    const updated = result[0];
+    if (user.familyId) {
+      const heartsResult = result[1] as { count: number };
+      if (heartsResult.count === 0) {
+        throw Errors.badRequest('하트가 부족합니다. 답변 수정에는 하트 1개가 필요합니다.');
+      }
+    }
 
     return this.toAnswerResponse(updated);
   }

@@ -1,9 +1,5 @@
 import prisma from '../utils/prisma';
-
-function isSameDate(a: Date | null | undefined, b: Date | null | undefined): boolean {
-  if (!a || !b) return false;
-  return a.toISOString().split('T')[0] === b.toISOString().split('T')[0];
-}
+import { isSameKstDate } from '../utils/kst';
 
 /**
  * 해당 DailyQuestion이 "그룹 전원이 답변 또는 패스 완료" 상태인지 확인하고
@@ -48,17 +44,22 @@ export async function tryFinalizeDailyQuestion(params: {
   const answeredUserIds = new Set(answers.map((a) => a.userId));
 
   const allCompleted = memberships.every(
-    (m) => answeredUserIds.has(m.userId) || isSameDate(m.skippedDate, dq.date)
+    (m) => answeredUserIds.has(m.userId) || isSameKstDate(m.skippedDate, dq.date)
   );
   if (!allCompleted) return;
 
+  // CAS: completedAt: null 조건으로만 업데이트. 동시 호출 두 번 들어와도 한 번만
+  // 갱신되어 history 노출일이 흔들리지 않는다 (이전엔 update 가 무조건 덮어써 두 번째
+  // 호출의 now 로 바뀔 수 있었음).
   const now = new Date();
-  await prisma.dailyQuestion.update({
-    where: { id: dq.id },
+  const result = await prisma.dailyQuestion.updateMany({
+    where: { id: dq.id, completedAt: null },
     data: { completedAt: now },
   });
 
-  console.log(
-    `[DQ Finalize] family=${familyId} dq=${dq.id} assigned=${dq.date.toISOString().split('T')[0]} completedAt=${now.toISOString()}`
-  );
+  if (result.count === 1) {
+    console.log(
+      `[DQ Finalize] family=${familyId} dq=${dq.id} assigned=${dq.date.toISOString().split('T')[0]} completedAt=${now.toISOString()}`
+    );
+  }
 }
