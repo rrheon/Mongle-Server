@@ -13,6 +13,7 @@ import { tryFinalizeDailyQuestion } from './dailyQuestionCompletion';
 import { NotificationService } from './NotificationService';
 import { PushNotificationService } from './PushNotificationService';
 import { getPushMessages } from '../utils/i18n/push';
+import { isInQuietHours } from '../utils/quietHours';
 
 export class QuestionService {
   /**
@@ -663,6 +664,9 @@ async function notifyNewQuestion(familyId: string): Promise<void> {
           fcmToken: true,
           locale: true,
           notifQuestion: true,
+          quietHoursEnabled: true,
+          quietHoursStart: true,
+          quietHoursEnd: true,
         },
       },
     },
@@ -688,6 +692,7 @@ async function notifyNewQuestion(familyId: string): Promise<void> {
   const pushTasks: Promise<unknown>[] = [];
   for (const m of members) {
     if (!m.notifQuestion) continue;
+    if (isInQuietHours(m)) continue;
     const msgs = getPushMessages(m.locale);
     const title = msgs.newQuestion.title;
     const body = msgs.newQuestion.body;
