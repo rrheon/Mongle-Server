@@ -78,9 +78,16 @@ export class NotificationService {
     await prisma.notification.create({ data: { userId, type, title, body, familyId: familyId ?? null, colorId: colorId ?? null } });
   }
 
-  /** 유저의 미읽음 알림 수 (뱃지 카운트용) */
+  /** 유저의 미읽음 알림 수 (뱃지 카운트용). userId 는 User.id (내부 UUID). 푸시 서비스용. */
   async getUnreadCount(userId: string): Promise<number> {
     return prisma.notification.count({ where: { userId, isRead: false } });
+  }
+
+  /** 인증된 사용자의 미읽음 알림 수. iOS 가 OS 배지 동기화 시 호출 (50건 캡 우회용). */
+  async getUnreadCountForAuthUser(authUserId: string): Promise<number> {
+    const user = await prisma.user.findUnique({ where: { userId: authUserId }, select: { id: true } });
+    if (!user) return 0;
+    return prisma.notification.count({ where: { userId: user.id, isRead: false } });
   }
 
   private toDTO(n: { id: string; userId: string; familyId: string | null; colorId?: string | null; type: NotificationType; title: string; body: string; isRead: boolean; createdAt: Date }): NotificationDTO {
