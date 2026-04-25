@@ -138,6 +138,22 @@ export class FamilyController extends Controller {
   }
 
   /**
+   * 방장 위임 + 본인 탈퇴 원자화. 클라이언트가 transferCreator → leaveFamily 를
+   * 두 호출로 수행할 때 사이에 발생하던 race 를 차단.
+   * @summary 방장 위임 후 탈퇴
+   */
+  @Post('transfer-and-leave')
+  @Security('jwt')
+  @SuccessResponse(204, '성공')
+  public async transferCreatorAndLeave(
+    @Request() req: AuthRequest,
+    @Body() body: TransferCreatorRequest
+  ): Promise<void> {
+    await this.familyService.transferCreatorAndLeave(req.user.userId, body.newCreatorId);
+    this.setStatus(204);
+  }
+
+  /**
    * 가족 떠나기 (familyId 없으면 현재 활성 가족에서 탈퇴)
    * @summary 가족 떠나기
    */
