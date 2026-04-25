@@ -487,14 +487,35 @@ export class QuestionService {
 
     const selected = questionPool[Math.floor(Math.random() * questionPool.length)];
 
-    const created = await prisma.dailyQuestion.create({
-      data: { questionId: selected.id, familyId, date },
-      include: { question: true },
-    });
+    // (familyId, date) 는 unique 제약. 스케줄러/getTodayQuestion/FamilyService 진입점이
+    // 동시에 발화하면 check-then-create 사이에 race 가 발생하여 P2002 → 500 으로 노출된다.
+    // create 실패 시 기존 DQ 를 재조회해 동일하게 NEW_QUESTION 알림까지 진행한다.
+    let created;
+    let isNewlyCreated = false;
+    try {
+      created = await prisma.dailyQuestion.create({
+        data: { questionId: selected.id, familyId, date },
+        include: { question: true },
+      });
+      isNewlyCreated = true;
+    } catch (e: any) {
+      if (e?.code === 'P2002') {
+        const existing = await prisma.dailyQuestion.findUnique({
+          where: { familyId_date: { familyId, date } },
+          include: { question: true },
+        });
+        if (!existing) throw e;
+        created = existing;
+      } else {
+        throw e;
+      }
+    }
 
-    await notifyNewQuestion(familyId).catch((e) => {
-      console.warn(`[QuestionService] NEW_QUESTION 알림 실패 family=${familyId}:`, e);
-    });
+    if (isNewlyCreated) {
+      await notifyNewQuestion(familyId).catch((e) => {
+        console.warn(`[QuestionService] NEW_QUESTION 알림 실패 family=${familyId}:`, e);
+      });
+    }
 
     return created;
   }
