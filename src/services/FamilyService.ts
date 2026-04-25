@@ -387,8 +387,14 @@ export class FamilyService {
         throw Errors.forbidden('그룹 생성자는 그룹을 떠날 수 없습니다.');
       }
 
-      // 혼자인 경우: 가족 자체를 삭제
+      // 혼자인 경우: 가족 자체를 삭제. Notification.familyId 도 함께 nullify 해
+      // 클라이언트가 사라진 가족을 라우팅 대상으로 잡지 않게 한다 (FK 없는 nullable
+      // 컬럼이라 cascade 자동 처리 안 됨 — MG-52).
       await prisma.$transaction(async (tx) => {
+        await tx.notification.updateMany({
+          where: { familyId: targetFamilyId },
+          data: { familyId: null },
+        });
         await tx.familyMembership.deleteMany({ where: { familyId: targetFamilyId } });
         await tx.dailyQuestion.deleteMany({ where: { familyId: targetFamilyId } });
         await tx.family.delete({ where: { id: targetFamilyId } });
@@ -422,8 +428,13 @@ export class FamilyService {
       // 마지막 멤버 탈퇴 시 Family + DailyQuestion 정리. 정상 흐름에서는 creator 단독
       // 케이스가 위 분기에서 이미 처리되지만, transferCreator/race 시퀀스로 leave 가
       // 비-creator 경로를 타고도 멤버 0명이 될 수 있어 여기서 한 번 더 정리.
+      // Notification.familyId 도 nullify 해 사라진 가족 라우팅 방지 (MG-52).
       const remaining = await tx.familyMembership.count({ where: { familyId: targetFamilyId } });
       if (remaining === 0) {
+        await tx.notification.updateMany({
+          where: { familyId: targetFamilyId },
+          data: { familyId: null },
+        });
         await tx.dailyQuestion.deleteMany({ where: { familyId: targetFamilyId } });
         await tx.family.delete({ where: { id: targetFamilyId } });
       }
