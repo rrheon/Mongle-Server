@@ -231,6 +231,10 @@ export class AnswerService {
     const colorMap = new Map(
       memberships.map((m) => [m.userId, m.colorId ?? m.user.moodId ?? 'loved'])
     );
+    // FamilyMembership 기반 멤버 ID 집합. user.familyId 단일 활성 그룹 필드는
+    // 다대다 전환 이후 답변 조회 기준으로 부정확 (그룹 이동/중복 가입 시 누락).
+    // MG-29 (멤버 조회) 와 동일 패턴을 답변 조회에도 적용.
+    const memberUserIds = memberships.map((m) => m.userId);
 
     // 해당 질문의 DailyQuestion 조회 (skip 날짜 비교용)
     const dailyQuestion = await prisma.dailyQuestion.findFirst({
@@ -245,9 +249,7 @@ export class AnswerService {
     const answers = await prisma.answer.findMany({
       where: {
         questionId: questionId.toLowerCase(),
-        user: {
-          familyId: user.familyId,
-        },
+        userId: { in: memberUserIds },
       },
       include: { user: true },
       orderBy: { createdAt: 'asc' },
