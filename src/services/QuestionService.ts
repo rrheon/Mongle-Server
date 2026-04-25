@@ -324,12 +324,17 @@ export class QuestionService {
         };
       });
 
-      // 히스토리 노출일: 완료 시점 기준 (KST). 미완료 질문은 배정일(date) 폴백.
-      // 예) 20일 배정 → 21일 모든 멤버 답변 완료 → 히스토리에서 21일로 노출.
-      // completedAt 은 UTC 타임스탬프이므로 KST 변환 헬퍼 사용 (split('T') 금지).
-      const displayDate = dq.completedAt
-        ? this.toKstDateString(dq.completedAt)
-        : this.toKstDateString(dq.date);
+      // 히스토리 노출일: 항상 배정일 기준 (KST). 옵션 D — 1일 1질문 1:1 매핑.
+      //
+      // 이전 정책은 displayDate = completedAt ?? date 였으나, "Day24 배정 → Day25
+      // 완료" 시 displayDate=Day25 가 되고 동시에 Day25 자체 배정 DQ 도 displayDate=
+      // Day25 가 되어 동일 캘린더 키에 두 DQ 가 매핑 → 클라이언트 dict 에서 후행
+      // 항목이 선행을 덮어쓰며 답변 데이터가 UI 에서 소실되는 버그가 있었다.
+      // 배정일을 단일 진실값으로 사용하면 충돌 원천 제거.
+      //
+      // completedAt 은 응답에 그대로 포함되어 클라이언트가 "완료된 날" 메타데이터
+      // 표시(예: "Day25 09:30 완료") 에 활용할 수 있다.
+      const displayDate = this.toKstDateString(dq.date);
 
       return {
         id: dq.id,
