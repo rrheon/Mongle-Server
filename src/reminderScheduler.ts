@@ -3,6 +3,7 @@ import prisma from './utils/prisma';
 import { NotificationService } from './services/NotificationService';
 import { PushNotificationService } from './services/PushNotificationService';
 import { getPushMessages } from './utils/i18n/push';
+import { isInQuietHours } from './utils/quietHours';
 
 const notificationService = new NotificationService();
 const pushService = new PushNotificationService();
@@ -83,6 +84,9 @@ export async function sendDailyReminders(): Promise<void> {
           fcmToken: true,
           locale: true,
           notifQuestion: true,
+          quietHoursEnabled: true,
+          quietHoursStart: true,
+          quietHoursEnd: true,
         },
       },
     },
@@ -189,26 +193,38 @@ export async function sendDailyReminders(): Promise<void> {
   }
   await Promise.all(dbNotifTasks);
 
+  // 배치 조회 ④: badge 카운트 N+1 제거. 푸시 대상 전체의 unread 를 한 번의 groupBy 로
+  // 조회 후 Map 으로 사용. 이전엔 user 마다 getUnreadCount 호출로 N 회 쿼리 발생.
+  const pushUserIds = Array.from(userInfoMap.keys());
+  const unreadCounts = await prisma.notification.groupBy({
+    by: ['userId'],
+    where: { userId: { in: pushUserIds }, isRead: false },
+    _count: { _all: true },
+  });
+  const unreadByUser = new Map<string, number>();
+  for (const row of unreadCounts) {
+    unreadByUser.set(row.userId, row._count._all);
+  }
+
   // 푸시 — 유저당 1회. 유저가 어느 가족에서든 미답변이면 미답변자 문구 사용(본인 답변이 더 긴급).
   const pushTasks: Promise<unknown>[] = [];
   for (const [userId, user] of userInfoMap) {
     if (!user.notifQuestion) continue;
+    if (isInQuietHours(user)) continue;
     const unanswered = userHasUnanswered.get(userId) ?? false;
     const { title, body } = makeBody(user.locale, unanswered);
+    const badgeCount = unreadByUser.get(userId) ?? 0;
 
     if (user.apnsToken) {
       pushTasks.push(
-        (async () => {
-          const badgeCount = await notificationService.getUnreadCount(userId);
-          await pushService.sendApnsPush(
-            user.apnsToken!,
-            title,
-            body,
-            'REMINDER',
-            badgeCount,
-            user.apnsEnvironment
-          );
-        })().catch((e) => {
+        pushService.sendApnsPush(
+          user.apnsToken!,
+          title,
+          body,
+          'REMINDER',
+          badgeCount,
+          user.apnsEnvironment
+        ).catch((e) => {
           console.warn('[Reminder] APNs 푸시 실패:', e);
         })
       );

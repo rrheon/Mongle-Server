@@ -11,6 +11,7 @@ import { NotificationService } from './NotificationService';
 import { PushNotificationService } from './PushNotificationService';
 import { tryFinalizeDailyQuestion } from './dailyQuestionCompletion';
 import { getPushMessages } from '../utils/i18n/push';
+import { isInQuietHours } from '../utils/quietHours';
 
 const notificationService = new NotificationService();
 const pushService = new PushNotificationService();
@@ -102,7 +103,11 @@ export class AnswerService {
         where: { familyId: user.familyId, userId: { not: user.id } },
         select: {
           user: {
-            select: { id: true, apnsToken: true, apnsEnvironment: true, fcmToken: true, locale: true, notifAnswer: true },
+            select: {
+              id: true, apnsToken: true, apnsEnvironment: true, fcmToken: true,
+              locale: true, notifAnswer: true,
+              quietHoursEnabled: true, quietHoursStart: true, quietHoursEnd: true,
+            },
           },
         },
       });
@@ -129,6 +134,8 @@ export class AnswerService {
       const pushTasks: Promise<unknown>[] = [];
       for (const member of otherMembers) {
         if (!member.notifAnswer) continue;
+        // quiet hours 면 푸시만 건너뜀. DB 알림은 1단계에서 이미 저장됨.
+        if (isInQuietHours(member)) continue;
         const msgs = getPushMessages(member.locale);
         const title = msgs.memberAnswered.title(senderNickname);
         const body = msgs.memberAnswered.body;

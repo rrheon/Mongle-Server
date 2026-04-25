@@ -3,9 +3,15 @@ import { Errors } from '../middleware/errorHandler';
 import { NotificationService } from './NotificationService';
 import { PushNotificationService } from './PushNotificationService';
 import { getPushMessages } from '../utils/i18n/push';
+import { isInQuietHours } from '../utils/quietHours';
 
 const notificationService = new NotificationService();
 const pushService = new PushNotificationService();
+
+// 동일 (sender, target) 페어 24시간 내 최대 재촉 횟수.
+// 알림 폭주 방지 + 답변 완료자 재촉 차단을 위한 1차 가드.
+const NUDGE_DAILY_LIMIT_PER_TARGET = 3;
+const NUDGE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export class NudgeService {
   /**
@@ -44,6 +50,44 @@ export class NudgeService {
       throw Errors.badRequest('자기 자신에게 재촉할 수 없습니다.');
     }
 
+    // 24시간 rate limit — 동일 대상에게 본인이 보낸 NUDGE 가 N건 이상이면 거부.
+    // Notification 테이블에 sender 컬럼이 없어 이번 PR 범위에서는 target 단위 누적
+    // (모든 sender 합산)으로 보호. follow-up: sender_user_id 컬럼 추가 후 페어 단위.
+    const recentNudges = await prisma.notification.count({
+      where: {
+        userId: target.id,
+        type: 'ANSWER_REQUEST',
+        createdAt: { gte: new Date(Date.now() - NUDGE_WINDOW_MS) },
+      },
+    });
+    if (recentNudges >= NUDGE_DAILY_LIMIT_PER_TARGET) {
+      throw Errors.tooMany(
+        `해당 구성원은 24시간 내 ${NUDGE_DAILY_LIMIT_PER_TARGET}회 이상 재촉되어 더 보낼 수 없습니다.`
+      );
+    }
+
+    // 답변 완료자에게 재촉 차단 — 그룹의 활성 DQ 에 대해 target 이 이미 답변/스킵 했으면 거부.
+    // 현재 DQ 가 carry-over 정책에 따라 임의 배정일을 가질 수 있으므로 latest DQ 기준.
+    const activeDQ = await prisma.dailyQuestion.findFirst({
+      where: { familyId: sender.familyId },
+      orderBy: { date: 'desc' },
+      select: { id: true, questionId: true, date: true },
+    });
+    if (activeDQ) {
+      const targetAnswered = await prisma.answer.findFirst({
+        where: { userId: target.id, questionId: activeDQ.questionId },
+        select: { id: true },
+      });
+      const targetSkipped =
+        targetMembership.skippedDate != null &&
+        activeDQ.date != null &&
+        targetMembership.skippedDate.toISOString().split('T')[0] ===
+          activeDQ.date.toISOString().split('T')[0];
+      if (targetAnswered || targetSkipped) {
+        throw Errors.badRequest('이미 답변/패스한 구성원에게는 재촉할 수 없습니다.');
+      }
+    }
+
     // 하트 차감 (FamilyMembership 기준)
     await prisma.familyMembership.updateMany({
       where: { userId: sender.id, familyId: sender.familyId },
@@ -71,9 +115,9 @@ export class NudgeService {
     );
 
     // 푸시 발송 — Lambda 환경에서는 반드시 await 해야 함.
-    // 알림 선호도 체크: notifNudge가 꺼져있으면 푸시 발송 건너뜀 (DB 알림 기록은 유지)
+    // 알림 선호도 체크: notifNudge 꺼졌거나 quiet hours 면 푸시 발송 건너뜀 (DB 알림 기록은 유지)
     const pushTasks: Promise<void>[] = [];
-    if (target.notifNudge) {
+    if (target.notifNudge && !isInQuietHours(target)) {
       if (target.apnsToken) {
         pushTasks.push(
           (async () => {
