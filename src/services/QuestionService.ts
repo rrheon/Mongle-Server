@@ -669,22 +669,31 @@ async function notifyNewQuestion(familyId: string): Promise<void> {
   });
   const members = memberships.map((m) => m.user);
 
-  const tasks: Promise<unknown>[] = [];
+  // 1단계: DB 알림 저장 — 푸시의 badge 카운트가 새 알림을 포함해 정확히 반영되도록
+  // 모든 createNotification 을 먼저 await. AnswerService.MEMBER_ANSWERED 와 동일 패턴.
+  const dbNotifTasks: Promise<unknown>[] = [];
   for (const m of members) {
     const msgs = getPushMessages(m.locale);
     const title = msgs.newQuestion.title;
     const body = msgs.newQuestion.body;
-
-    tasks.push(
+    dbNotifTasks.push(
       notifSvc.createNotification(m.id, 'NEW_QUESTION', title, body, familyId).catch((e) => {
         console.warn(`[notifyNewQuestion] DB 알림 실패 user=${m.id} family=${familyId}:`, e);
       })
     );
+  }
+  await Promise.all(dbNotifTasks);
 
+  // 2단계: 푸시 발송 (DB 알림 반영된 unread 카운트 사용)
+  const pushTasks: Promise<unknown>[] = [];
+  for (const m of members) {
     if (!m.notifQuestion) continue;
+    const msgs = getPushMessages(m.locale);
+    const title = msgs.newQuestion.title;
+    const body = msgs.newQuestion.body;
 
     if (m.apnsToken) {
-      tasks.push(
+      pushTasks.push(
         (async () => {
           const badge = await notifSvc.getUnreadCount(m.id);
           await pushSvc.sendApnsPush(m.apnsToken!, title, body, 'NEW_QUESTION', badge, m.apnsEnvironment);
@@ -694,14 +703,14 @@ async function notifyNewQuestion(familyId: string): Promise<void> {
       );
     }
     if (m.fcmToken) {
-      tasks.push(
+      pushTasks.push(
         pushSvc.sendFcmPush(m.fcmToken, title, body, 'NEW_QUESTION').catch((e) => {
           console.warn(`[notifyNewQuestion] FCM 실패 user=${m.id}:`, e);
         })
       );
     }
   }
-  await Promise.all(tasks);
+  await Promise.all(pushTasks);
 }
 
 export { notifyNewQuestion };

@@ -225,8 +225,26 @@ export class PushNotificationService {
             req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
             req.on('end', () => {
               console.error(`[APNs] 푸시 실패 status=${status} token=${deviceToken.substring(0, 8)}...`, body);
-              // 410 Gone = 토큰이 더 이상 유효하지 않음 → DB에서 자동 정리
-              if (status === 410 || status === 400) {
+              // 410 Gone = 토큰 만료/미설치. 항상 무효화.
+              // 400 Bad Request 는 토큰 외 사유(BadCertificate, BadTopic, BadMessageId,
+              // BadPriority 등 페이로드/설정 오류)도 포함되므로 reason 을 확인해
+              // 토큰-invalid 류만 정리. reason 미상이면 안전 측 보존.
+              const tokenInvalidReasons = new Set([
+                'BadDeviceToken',
+                'Unregistered',
+                'DeviceTokenNotForTopic',
+                'TopicDisallowed',
+              ]);
+              let shouldInvalidate = status === 410;
+              if (status === 400) {
+                try {
+                  const reason = (JSON.parse(body) as { reason?: string }).reason;
+                  if (reason && tokenInvalidReasons.has(reason)) shouldInvalidate = true;
+                } catch {
+                  // body 파싱 실패 시 토큰 손상 단정 불가 → 보존
+                }
+              }
+              if (shouldInvalidate) {
                 this.invalidateApnsToken(deviceToken).catch((e) => {
                   console.error('[APNs] 토큰 무효화 실패:', e);
                 });
