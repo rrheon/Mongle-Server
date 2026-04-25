@@ -34,6 +34,10 @@ export const Errors = {
   conflict: (message: string) =>
     new ApiError(409, 'CONFLICT', message),
 
+  tooMany: (message: string, retryAfterSec?: number) =>
+    new ApiError(429, 'TOO_MANY_REQUESTS', message,
+      retryAfterSec != null ? { retryAfterSec } : undefined),
+
   internal: (message = '서버 오류가 발생했습니다.') =>
     new ApiError(500, 'INTERNAL_ERROR', message),
 };

@@ -27,6 +27,13 @@ import type { SocialLoginResult } from './AuthService';
 const CODE_EXPIRY_MS = 10 * 60 * 1000; // 10분
 const MAX_ATTEMPTS = 5;
 const BCRYPT_ROUNDS = 10;
+// requestSignupCode 동일 이메일 재요청 최소 간격. SMTP 비용/스팸 방지.
+const CODE_REQUEST_COOLDOWN_MS = 60 * 1000;
+// 로그인 brute-force 잠금 윈도우/임계값. attempts >= LOGIN_LOCK_THRESHOLD 면
+// LOGIN_LOCK_WINDOW_MS 동안 잠금 (429). 잠금 동안에도 attempts 는 증가하지 않는다.
+const LOGIN_LOCK_THRESHOLD = 5;
+const LOGIN_LOCK_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_LOCK_PURPOSE = 'LOGIN_LOCK';
 
 // RFC 5322 간소화 버전 — 클라이언트에서도 동일 수준으로 검증
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -66,6 +73,19 @@ export class EmailAuthService {
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
       throw Errors.conflict('이미 가입된 이메일입니다.');
+    }
+
+    // 60초 쿨다운 — 동일 이메일에 대한 코드 재요청 폭주/SMTP 비용 방어.
+    // 잠금/스팸 방지가 목적이라 "이미 발송됨" 정도의 정보 노출은 허용.
+    const recent = await prisma.emailVerification.findFirst({
+      where: { email, purpose: 'SIGNUP' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (recent && Date.now() - recent.createdAt.getTime() < CODE_REQUEST_COOLDOWN_MS) {
+      const retryAfterSec = Math.ceil(
+        (CODE_REQUEST_COOLDOWN_MS - (Date.now() - recent.createdAt.getTime())) / 1000
+      );
+      throw Errors.tooMany(`코드 재발송은 ${retryAfterSec}초 뒤에 가능합니다.`);
     }
 
     // 기존 발송분 consumed 처리
@@ -191,19 +211,62 @@ export class EmailAuthService {
 
   /**
    * 기존 이메일 계정 로그인.
+   * brute-force 방어: EmailVerification (purpose=LOGIN_LOCK) 을 piggyback 으로 활용해
+   * 이메일 단위 실패 카운트/잠금 윈도우를 추적. 별도 스키마 마이그레이션 없이 적용.
+   * 잠금 활성 동안은 비밀번호 검증 자체를 건너뛰고 429 즉시 반환.
    */
   async login(rawEmail: string, password: string): Promise<SocialLoginResult> {
     const email = validateEmail(rawEmail);
+    const now = new Date();
+
+    // 잠금 윈도우 안의 LOGIN_LOCK 레코드 조회
+    const lock = await prisma.emailVerification.findFirst({
+      where: { email, purpose: LOGIN_LOCK_PURPOSE, expiresAt: { gt: now } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (lock && lock.attempts >= LOGIN_LOCK_THRESHOLD) {
+      const retryAfterSec = Math.ceil((lock.expiresAt.getTime() - now.getTime()) / 1000);
+      throw Errors.tooMany(
+        `로그인 시도가 너무 많습니다. ${retryAfterSec}초 뒤에 다시 시도해주세요.`,
+        retryAfterSec
+      );
+    }
 
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !user.passwordHash) {
+    const passwordOk = user?.passwordHash
+      ? await bcrypt.compare(password, user.passwordHash)
+      : false;
+
+    if (!user || !user.passwordHash || !passwordOk) {
+      // 실패 카운트 증가. lock 이 없으면 새로 만들고, 있으면 attempts 증가.
+      if (lock) {
+        await prisma.emailVerification.update({
+          where: { id: lock.id },
+          data: { attempts: { increment: 1 } },
+        });
+      } else {
+        await prisma.emailVerification.create({
+          data: {
+            email,
+            purpose: LOGIN_LOCK_PURPOSE,
+            // 임의의 비교에 쓰이지 않는 자리. bcrypt hash 컬럼 NOT NULL 제약 충족용 placeholder.
+            codeHash: '-',
+            expiresAt: new Date(now.getTime() + LOGIN_LOCK_WINDOW_MS),
+            attempts: 1,
+          },
+        });
+      }
       // 소셜 전용 계정도 동일 메시지 — 이메일 존재 여부 노출 최소화
       throw Errors.unauthorized('이메일 또는 비밀번호가 올바르지 않습니다.');
     }
 
-    const ok = await bcrypt.compare(password, user.passwordHash);
-    if (!ok) {
-      throw Errors.unauthorized('이메일 또는 비밀번호가 올바르지 않습니다.');
+    // 성공: 잠금 윈도우 정리
+    if (lock) {
+      await prisma.emailVerification.update({
+        where: { id: lock.id },
+        data: { consumed: true, attempts: 0 },
+      });
     }
 
     return buildLoginResult(user);
