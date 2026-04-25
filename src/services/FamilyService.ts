@@ -36,43 +36,46 @@ export class FamilyService {
       throw Errors.conflict(`그룹은 최대 ${MAX_GROUPS}개까지 참여할 수 있습니다.`);
     }
 
-    // 고유한 초대 코드 생성
-    let inviteCode: string;
-    let attempts = 0;
-    do {
-      inviteCode = generateInviteCode();
-      const existing = await prisma.family.findUnique({ where: { inviteCode } });
-      if (!existing) break;
-      attempts++;
-    } while (attempts < 10);
+    // 가족 생성 + 멤버십 등록 (트랜잭션). inviteCode 충돌 시 P2002 catch 후 재시도.
+    // findUnique 사전 검사 + create 의 race 로 인해 두 동시 요청이 같은 코드를 채택하고
+    // 두 번째 create 가 P2002 로 실패하던 시나리오를 방어.
+    let family: { id: string; name: string; inviteCode: string; createdById: string; createdAt: Date };
+    let createAttempts = 0;
+    while (true) {
+      const inviteCode = generateInviteCode();
+      try {
+        family = await prisma.$transaction(async (tx) => {
+          const newFamily = await tx.family.create({
+            data: { name: data.name, inviteCode, createdById: user.id },
+          });
 
-    if (attempts >= 10) throw Errors.internal('초대 코드 생성에 실패했습니다.');
+          await tx.familyMembership.create({
+            data: {
+              userId: user.id,
+              familyId: newFamily.id,
+              role: data.creatorRole,
+              nickname: data.nickname ?? null,
+              colorId: data.colorId ?? 'loved',
+              hearts: 5,
+            },
+          });
 
-    // 가족 생성 + 멤버십 등록 (트랜잭션)
-    const family = await prisma.$transaction(async (tx) => {
-      const newFamily = await tx.family.create({
-        data: { name: data.name, inviteCode, createdById: user.id },
-      });
+          await tx.user.update({
+            where: { id: user.id },
+            data: { familyId: newFamily.id, role: data.creatorRole },
+          });
 
-      await tx.familyMembership.create({
-        data: {
-          userId: user.id,
-          familyId: newFamily.id,
-          role: data.creatorRole,
-          nickname: data.nickname ?? null,
-          colorId: data.colorId ?? 'loved',
-          hearts: 5,
-        },
-      });
-
-      // 현재 활성 가족 설정
-      await tx.user.update({
-        where: { id: user.id },
-        data: { familyId: newFamily.id, role: data.creatorRole },
-      });
-
-      return newFamily;
-    });
+          return newFamily;
+        });
+        break;
+      } catch (e: any) {
+        if (e?.code === 'P2002' && createAttempts < 10) {
+          createAttempts++;
+          continue;
+        }
+        throw e;
+      }
+    }
 
     // MG-16: 가입 즉시 첫 질문 발급 (스케줄러의 KST 11시 cron까지 기다리지 않음).
     // 트랜잭션 외부에서 호출 — 질문 풀 조회 등 부수효과가 있고, 실패해도 가족 생성은 성공해야 함.
@@ -111,33 +114,42 @@ export class FamilyService {
     });
     if (!family) throw Errors.notFound('그룹');
 
-    // 이미 이 가족 멤버인지 확인
+    // 이미 이 가족 멤버인지 확인 (트랜잭션 외부 사전 검사 — 빠른 거부)
     const existing = await prisma.familyMembership.findUnique({
       where: { userId_familyId: { userId: user.id, familyId: family.id } },
     });
     if (existing) throw Errors.conflict('이미 해당 그룹에 속해 있습니다.');
 
-    // 그룹 최대 인원 확인
-    const currentMemberCount = await prisma.familyMembership.count({
-      where: { familyId: family.id },
-    });
-    if (currentMemberCount >= MAX_MEMBERS) {
-      throw Errors.conflict(`그룹 인원이 가득 찼습니다. 최대 ${MAX_MEMBERS}명까지 참여할 수 있습니다.`);
-    }
-
+    // 트랜잭션 내부에서 인원 재검사 + 가입. 두 동시 요청이 7명 시점에 같이 통과 후
+    // 9명을 만들던 race 를 차단. P2002 (이미 가입) 도 catch 해 409 로 변환.
     await prisma.$transaction(async (tx) => {
-      await tx.familyMembership.create({
-        data: {
-          userId: user.id,
-          familyId: family.id,
-          role: data.role,
-          nickname: data.nickname ?? null,
-          colorId: data.colorId ?? 'loved',
-          hearts: 5,
-        },
+      const currentMemberCount = await tx.familyMembership.count({
+        where: { familyId: family.id },
       });
+      if (currentMemberCount >= MAX_MEMBERS) {
+        throw Errors.conflict(
+          `그룹 인원이 가득 찼습니다. 최대 ${MAX_MEMBERS}명까지 참여할 수 있습니다.`
+        );
+      }
 
-      // 현재 활성 가족 설정
+      try {
+        await tx.familyMembership.create({
+          data: {
+            userId: user.id,
+            familyId: family.id,
+            role: data.role,
+            nickname: data.nickname ?? null,
+            colorId: data.colorId ?? 'loved',
+            hearts: 5,
+          },
+        });
+      } catch (e: any) {
+        if (e?.code === 'P2002') {
+          throw Errors.conflict('이미 해당 그룹에 속해 있습니다.');
+        }
+        throw e;
+      }
+
       await tx.user.update({
         where: { id: user.id },
         data: { familyId: family.id, role: data.role },
@@ -389,15 +401,81 @@ export class FamilyService {
     }
 
     await prisma.$transaction(async (tx) => {
-      // 멤버십 삭제
       await tx.familyMembership.deleteMany({
         where: { userId: user.id, familyId: targetFamilyId },
       });
 
-      // 현재 활성 가족이었으면 다른 가족으로 전환
       if (user.familyId === targetFamilyId) {
         const nextMembership = await tx.familyMembership.findFirst({
           where: { userId: user.id, familyId: { not: targetFamilyId } },
+          orderBy: { joinedAt: 'asc' },
+        });
+        await tx.user.update({
+          where: { id: user.id },
+          data: {
+            familyId: nextMembership?.familyId ?? null,
+            role: nextMembership?.role ?? 'OTHER',
+          },
+        });
+      }
+
+      // 마지막 멤버 탈퇴 시 Family + DailyQuestion 정리. 정상 흐름에서는 creator 단독
+      // 케이스가 위 분기에서 이미 처리되지만, transferCreator/race 시퀀스로 leave 가
+      // 비-creator 경로를 타고도 멤버 0명이 될 수 있어 여기서 한 번 더 정리.
+      const remaining = await tx.familyMembership.count({ where: { familyId: targetFamilyId } });
+      if (remaining === 0) {
+        await tx.dailyQuestion.deleteMany({ where: { familyId: targetFamilyId } });
+        await tx.family.delete({ where: { id: targetFamilyId } });
+      }
+    });
+  }
+
+  /**
+   * 방장 위임 + 본인 탈퇴 원자화.
+   * 이전에는 클라이언트가 transferCreator → leaveFamily 두 호출을 순차 수행했는데,
+   * 사이에 race (피위임자 탈퇴, 다른 멤버 가입 등) 가 발생하면 그룹 상태가 어긋났다.
+   * 본 endpoint 는 두 작업을 단일 트랜잭션으로 묶어 일관성을 보장한다.
+   * 72 시간 정책은 본 경로에도 동일 적용 — 위임을 우회한 즉시 해제 차단 의도 보존.
+   */
+  async transferCreatorAndLeave(userId: string, newCreatorId: string): Promise<void> {
+    const normalizedNewCreatorId = newCreatorId.toLowerCase();
+
+    const user = await prisma.user.findUnique({ where: { userId } });
+    if (!user || !user.familyId) throw Errors.badRequest('그룹에 속해 있지 않습니다.');
+
+    const family = await prisma.family.findUnique({ where: { id: user.familyId } });
+    if (!family) throw Errors.notFound('그룹');
+    if (family.createdById !== user.id) throw Errors.forbidden('방장만 위임할 수 있습니다.');
+    if (normalizedNewCreatorId === user.id) throw Errors.badRequest('자기 자신에게 위임할 수 없습니다.');
+
+    const familyId = user.familyId;
+
+    await prisma.$transaction(async (tx) => {
+      // 트랜잭션 내부에서 피위임자 멤버십 + 방장 권한 검증 재수행 — race 차단
+      const currentFamily = await tx.family.findUnique({ where: { id: familyId } });
+      if (!currentFamily) throw Errors.notFound('그룹');
+      if (currentFamily.createdById !== user.id) throw Errors.forbidden('방장만 위임할 수 있습니다.');
+
+      const newCreatorMembership = await tx.familyMembership.findUnique({
+        where: { userId_familyId: { userId: normalizedNewCreatorId, familyId } },
+      });
+      if (!newCreatorMembership) throw Errors.notFound('대상 구성원');
+
+      // 1) 위임
+      await tx.family.update({
+        where: { id: familyId },
+        data: { createdById: normalizedNewCreatorId },
+      });
+
+      // 2) 본인 멤버십 삭제
+      await tx.familyMembership.delete({
+        where: { userId_familyId: { userId: user.id, familyId } },
+      });
+
+      // 3) 활성 가족 전환
+      if (user.familyId === familyId) {
+        const nextMembership = await tx.familyMembership.findFirst({
+          where: { userId: user.id, familyId: { not: familyId } },
           orderBy: { joinedAt: 'asc' },
         });
         await tx.user.update({
