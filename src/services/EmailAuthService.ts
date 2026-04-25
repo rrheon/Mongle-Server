@@ -18,7 +18,7 @@
 
 import bcrypt from 'bcryptjs';
 import prisma from '../utils/prisma';
-import { signToken, signRefreshToken } from '../utils/jwt';
+import { issueTokensForUser } from './AuthService';
 import { Errors } from '../middleware/errorHandler';
 import { LEGAL_VERSIONS } from '../utils/legalVersions';
 import { sendVerificationEmail } from '../utils/emailSender';
@@ -212,10 +212,9 @@ export class EmailAuthService {
 
 type UserRow = Awaited<ReturnType<typeof prisma.user.findUnique>>;
 
-function buildLoginResult(user: NonNullable<UserRow>): SocialLoginResult {
+async function buildLoginResult(user: NonNullable<UserRow>): Promise<SocialLoginResult> {
   const jwtPayload = { sub: user.userId, email: user.email };
-  const token = signToken(jwtPayload);
-  const refresh_token = signRefreshToken(jwtPayload);
+  const { token, refresh_token } = await issueTokensForUser(user.id, jwtPayload);
 
   const requiredConsents: Array<'terms' | 'privacy'> = [];
   if (user.termsAcceptedVersion !== LEGAL_VERSIONS.terms) requiredConsents.push('terms');

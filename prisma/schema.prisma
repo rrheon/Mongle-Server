@@ -49,9 +49,30 @@ model User {
   moodRecords        MoodRecord[]
   notifications      Notification[]
   accessLogs         UserAccessLog[]
+  refreshTokens      UserRefreshToken[]
   family             Family?            @relation(fields: [familyId], references: [id])
 
   @@map("users")
+}
+
+// 발급한 refresh 토큰의 hash 와 상태를 추적해 rotation/replay 방어를 가능하게 한다.
+// raw 토큰은 절대 저장하지 않고, 발급 시 sha256(token) 만 보관한다.
+// refresh 시 정상 흐름은 revokedAt 을 찍고 새 토큰을 발급(replacedById 연결).
+// 이미 revokedAt 이 찍힌 토큰으로 다시 refresh 가 들어오면 탈취 의심 → 동 사용자의
+// active 토큰 전부를 revoke 하고 401 반환.
+model UserRefreshToken {
+  id           String    @id @default(uuid())
+  userId       String    @map("user_id")
+  tokenHash    String    @unique @map("token_hash")
+  expiresAt    DateTime  @map("expires_at")
+  revokedAt    DateTime? @map("revoked_at")
+  // 정상 rotation 시 새로 발급된 토큰의 id. replay 디버깅/추적용.
+  replacedById String?   @map("replaced_by_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  user         User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("user_refresh_tokens")
 }
 
 model Family {

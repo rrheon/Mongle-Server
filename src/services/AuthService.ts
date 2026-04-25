@@ -1,9 +1,36 @@
+import * as crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import jwksClient from 'jwks-rsa';
 import prisma from '../utils/prisma';
 import { signToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
 import { Errors } from '../middleware/errorHandler';
 import { LEGAL_VERSIONS } from '../utils/legalVersions';
+
+// refresh 토큰 만료 (jwt.ts 의 JWT_REFRESH_EXPIRES_IN='30d' 와 동일하게 유지).
+// DB 레코드의 expiresAt 도 동일 기준으로 채워 cleanup/expiry 검사에 사용한다.
+const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+/**
+ * Access + Refresh 한 쌍을 발급하고, refresh hash 를 DB 에 영속화한다.
+ * 정상 rotation/logout/탈취 감지 시 동 row 의 revokedAt 을 갱신해 invalidate.
+ */
+export async function issueTokensForUser(
+  internalUserId: string,
+  jwtPayload: { sub: string; email: string }
+): Promise<{ token: string; refresh_token: string }> {
+  const token = signToken(jwtPayload);
+  const refresh_token = signRefreshToken(jwtPayload);
+  const tokenHash = hashToken(refresh_token);
+  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
+  await prisma.userRefreshToken.create({
+    data: { userId: internalUserId, tokenHash, expiresAt },
+  });
+  return { token, refresh_token };
+}
 
 // iOS 네이티브 Apple Sign-In → aud = App Bundle ID (예: com.yongheon.Mongle)
 // Android Custom Tab Apple OAuth → aud = Services ID (예: com.mongle.app.signin)
@@ -244,8 +271,7 @@ export class AuthService {
     }
 
     const jwtPayload = { sub: user.userId, email: user.email };
-    const token = signToken(jwtPayload);
-    const refresh_token = signRefreshToken(jwtPayload);
+    const { token, refresh_token } = await issueTokensForUser(user.id, jwtPayload);
 
     const requiredConsents: Array<'terms' | 'privacy'> = [];
     if (user.termsAcceptedVersion !== LEGAL_VERSIONS.terms) requiredConsents.push('terms');
@@ -317,14 +343,26 @@ export class AuthService {
   }
 
   /**
-   * 로그아웃 — 디바이스 푸시 토큰(APNs/FCM) 제거
-   * 동일 디바이스로 다른 계정 로그인 시 이전 계정에 푸시가 가는 문제 방지
+   * 로그아웃 — 디바이스 푸시 토큰(APNs/FCM) 제거 + active refresh 토큰 전체 revoke
+   * 동일 디바이스로 다른 계정 로그인 시 이전 계정에 푸시가 가는 문제 방지.
+   * refresh 토큰을 함께 무효화해야 logout 이후 동일 토큰으로 access 재발급 불가.
    */
   async logout(userId: string): Promise<void> {
-    await prisma.user.updateMany({
-      where: { userId },
-      data: { apnsToken: null, fcmToken: null },
-    });
+    const user = await prisma.user.findUnique({ where: { userId }, select: { id: true } });
+    if (!user) {
+      // 이미 삭제된 계정의 logout 호출도 ok 처리 (idempotent)
+      return;
+    }
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: user.id },
+        data: { apnsToken: null, fcmToken: null },
+      }),
+      prisma.userRefreshToken.updateMany({
+        where: { userId: user.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
   }
 
   async refreshToken(refreshToken: string): Promise<TokenRefreshResult> {
@@ -335,15 +373,55 @@ export class AuthService {
       throw Errors.unauthorized('유효하지 않거나 만료된 리프레시 토큰입니다.');
     }
 
-    // 사용자가 여전히 존재하는지 확인
     const user = await prisma.user.findUnique({ where: { userId: payload.sub } });
     if (!user) throw Errors.notFound('사용자');
 
-    const jwtPayload = { sub: user.userId, email: user.email };
-    const token = signToken(jwtPayload);
-    const newRefreshToken = signRefreshToken(jwtPayload);
+    const tokenHash = hashToken(refreshToken);
+    const record = await prisma.userRefreshToken.findUnique({ where: { tokenHash } });
 
-    return { token, refresh_token: newRefreshToken };
+    // DB 미등록 토큰: 본 마이그레이션 이전 발급분이거나 로그아웃 후 재사용 시도.
+    // 마이그레이션 직후 호환을 위해 grace period 가 필요하면 여기서 신규 발급 흐름으로
+    // 폴백할 수 있으나, 보안 우선으로 거부 + 클라이언트 재로그인 유도 (MG-33 흐름).
+    if (!record) {
+      throw Errors.unauthorized('유효하지 않은 리프레시 토큰입니다.');
+    }
+
+    // 이미 revoke 된 토큰으로의 refresh 시도 = 탈취 가능성. 해당 사용자의 active 토큰
+    // 전부 revoke 하고 거부. 정상 클라이언트는 재로그인 유도.
+    if (record.revokedAt) {
+      await prisma.userRefreshToken.updateMany({
+        where: { userId: user.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      throw Errors.unauthorized('재사용이 감지된 리프레시 토큰입니다. 다시 로그인해주세요.');
+    }
+
+    if (record.expiresAt.getTime() < Date.now()) {
+      throw Errors.unauthorized('만료된 리프레시 토큰입니다.');
+    }
+
+    const jwtPayload = { sub: user.userId, email: user.email };
+    const newToken = signToken(jwtPayload);
+    const newRefreshToken = signRefreshToken(jwtPayload);
+    const newHash = hashToken(newRefreshToken);
+    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
+
+    // 기존 row revoke + 새 row 생성을 단일 트랜잭션으로. replacedById 로 추적 연결.
+    const [, newRecord] = await prisma.$transaction([
+      prisma.userRefreshToken.update({
+        where: { id: record.id },
+        data: { revokedAt: new Date() },
+      }),
+      prisma.userRefreshToken.create({
+        data: { userId: user.id, tokenHash: newHash, expiresAt },
+      }),
+    ]);
+    await prisma.userRefreshToken.update({
+      where: { id: record.id },
+      data: { replacedById: newRecord.id },
+    });
+
+    return { token: newToken, refresh_token: newRefreshToken };
   }
 
   async deleteAccount(userId: string): Promise<void> {
