@@ -428,12 +428,44 @@ export class AuthService {
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) return;
 
+    // 사용자가 방장인 가족이 남아있으면 정리해야 user.delete 가 FK orphan 을 만들지 않음.
+    // - 다른 멤버가 있는 그룹: 가입 순서 가장 빠른 멤버에게 자동 위임 (탈퇴 정책 유지)
+    // - 혼자 남은 그룹: 가족 + DailyQuestion 함께 삭제
+    const ownedFamilies = await prisma.family.findMany({
+      where: { createdById: user.id },
+      select: { id: true },
+    });
+
+    for (const owned of ownedFamilies) {
+      const others = await prisma.familyMembership.findMany({
+        where: { familyId: owned.id, userId: { not: user.id } },
+        orderBy: { joinedAt: 'asc' },
+        select: { userId: true },
+      });
+      if (others.length === 0) {
+        // 혼자 — DQ + Family 모두 정리. createdById 외래는 user.delete 단계에서 자동 해결.
+        await prisma.$transaction([
+          prisma.dailyQuestion.deleteMany({ where: { familyId: owned.id } }),
+          prisma.familyMembership.deleteMany({ where: { familyId: owned.id } }),
+          prisma.family.delete({ where: { id: owned.id } }),
+        ]);
+      } else {
+        // 자동 위임 (탈퇴 자동 위임 정책과 동일하게 가장 오래된 멤버)
+        await prisma.family.update({
+          where: { id: owned.id },
+          data: { createdById: others[0].userId },
+        });
+      }
+    }
+
     // FK 제약으로 인해 관련 데이터 먼저 삭제
     await prisma.notification.deleteMany({ where: { userId: user.id } });
     await prisma.moodRecord.deleteMany({ where: { userId: user.id } });
     await prisma.userAccessLog.deleteMany({ where: { userId: user.id } });
     await prisma.answer.deleteMany({ where: { userId: user.id } });
     await prisma.familyMembership.deleteMany({ where: { userId: user.id } });
+    // MG-42 이후 추가된 외래 — 이걸 안 지우면 user.delete 가 P2003 으로 실패한다.
+    await prisma.userRefreshToken.deleteMany({ where: { userId: user.id } });
 
     await prisma.user.delete({ where: { userId } });
   }
