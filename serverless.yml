@@ -152,6 +152,18 @@ functions:
           rate: cron(0 10 * * ? *)
           enabled: ${self:custom.schedulerEnabled.${self:provider.stage}, false}
 
+  # 매일 새벽 만료/소비 row 정리 cron (KST 04:00 = UTC 19:00)
+  # EmailVerification / UserAccessLog / UserRefreshToken / Notification 일괄 정리.
+  # MG-52 — 무한 누적 차단 + LOGIN_LOCK piggyback 정리.
+  # enabled: MG-30 — prod 에서만 활성화 (dev 는 .env 가 prod DB 라 중복 실행 방지).
+  cleanupScheduler:
+    handler: src/cleanupScheduler.handler
+    timeout: 60
+    events:
+      - schedule:
+          rate: cron(0 19 * * ? *)
+          enabled: ${self:custom.schedulerEnabled.${self:provider.stage}, false}
+
 # 리소스 정의 (선택사항 - 별도 CloudFormation으로 관리 권장)
 # resources:
 #   Resources:
