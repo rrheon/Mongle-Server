@@ -14,6 +14,10 @@ interface DeleteCountResponse {
   count: number;
 }
 
+interface UnreadCountResponse {
+  count: number;
+}
+
 @Route('notifications')
 @Tags('Notification')
 export class NotificationController extends Controller {
@@ -47,6 +51,18 @@ export class NotificationController extends Controller {
     @Path() notificationId: string
   ): Promise<NotificationDTO> {
     return this.notificationService.markAsRead(req.user.userId, notificationId);
+  }
+
+  /**
+   * 미읽음 알림 수. OS 배지 동기화용 — iOS getNotifications(limit:50) 캡과 무관하게 정확.
+   * @summary 미읽음 카운트
+   */
+  @Get('unread-count')
+  @Security('jwt')
+  @SuccessResponse(200, '성공')
+  public async getUnreadCount(@Request() req: AuthRequest): Promise<UnreadCountResponse> {
+    const count = await this.notificationService.getUnreadCountForAuthUser(req.user.userId);
+    return { count };
   }
 
   /**
