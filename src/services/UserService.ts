@@ -1,6 +1,8 @@
 import prisma from '../utils/prisma';
 import { UserResponse, UpdateUserRequest } from '../models';
 import { Errors } from '../middleware/errorHandler';
+import { getKstToday } from '../utils/kst';
+import { resolveLocaleFromHeader } from '../utils/i18n/push';
 
 const MAX_AD_HEARTS = 5; // 1회 광고 시청 보상 최대 하트 수
 
@@ -41,49 +43,48 @@ export class UserService {
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) return;
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const alreadyGrantedToday =
-      user.lastHeartGrantedAt && user.lastHeartGrantedAt >= today;
-
-    // Accept-Language → user.locale 동기화 (변경 시에만 UPDATE 발행)
-    const { resolveLocaleFromHeader } = await import('../utils/i18n/push');
+    // KST 자정을 UTC 로 정규화 — Lambda 가 UTC 인 환경에서 KST 0~8시 요청이
+    // 전날로 잘못 묶이는 off-by-one 을 차단.
+    const kstToday = getKstToday();
     const resolvedLocale = acceptLanguage ? resolveLocaleFromHeader(acceptLanguage) : null;
 
-    const tasks: Promise<unknown>[] = [
-      prisma.userAccessLog.create({ data: { userId: user.id } }),
-    ];
+    // 액세스 로그는 본 로직 영향 최소화를 위해 트랜잭션 밖에서 fire-and-forget
+    prisma.userAccessLog
+      .create({ data: { userId: user.id } })
+      .catch((err) => {
+        console.warn('[recordAccess] access log 실패', { userId, err: (err as Error)?.message });
+      });
 
-    if (!alreadyGrantedToday) {
-      tasks.push(
-        prisma.user.update({
-          where: { id: user.id },
+    // 트랜잭션 + 내부 재조회로 race 차단:
+    // 동일 유저의 동시 호출 시 두 번째 트랜잭션도 갱신된 lastHeartGrantedAt 을 보고
+    // alreadyGrantedToday 판정이 일관되어 +2 지급을 막는다.
+    await prisma.$transaction(async (tx) => {
+      const fresh = await tx.user.findUniqueOrThrow({ where: { id: user.id } });
+      const alreadyGrantedToday =
+        fresh.lastHeartGrantedAt != null && fresh.lastHeartGrantedAt >= kstToday;
+
+      if (!alreadyGrantedToday) {
+        await tx.user.update({
+          where: { id: fresh.id },
           data: {
             lastHeartGrantedAt: new Date(),
-            ...(resolvedLocale && user.locale !== resolvedLocale ? { locale: resolvedLocale } : {}),
+            ...(resolvedLocale && fresh.locale !== resolvedLocale ? { locale: resolvedLocale } : {}),
           },
-        })
-      );
-      if (user.familyId) {
-        tasks.push(
-          prisma.familyMembership.updateMany({
-            where: { userId: user.id, familyId: user.familyId },
+        });
+        if (fresh.familyId) {
+          await tx.familyMembership.updateMany({
+            where: { userId: fresh.id, familyId: fresh.familyId },
             data: { hearts: { increment: 1 } },
-          })
-        );
-      }
-    } else if (resolvedLocale && user.locale !== resolvedLocale) {
-      // 오늘 하트는 이미 지급됐지만 locale 이 바뀌었으면 그것만 반영
-      tasks.push(
-        prisma.user.update({
-          where: { id: user.id },
+          });
+        }
+      } else if (resolvedLocale && fresh.locale !== resolvedLocale) {
+        // 오늘 하트는 이미 지급됐지만 locale 이 바뀌었으면 그것만 반영
+        await tx.user.update({
+          where: { id: fresh.id },
           data: { locale: resolvedLocale },
-        })
-      );
-    }
-
-    await Promise.all(tasks);
+        });
+      }
+    });
   }
 
   /**
