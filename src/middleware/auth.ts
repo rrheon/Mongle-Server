@@ -69,7 +69,9 @@ export async function expressAuthentication(
   const acceptLanguage = request.headers['accept-language'] as string | undefined;
   const recordAccessSilently = (userId: string) => {
     import('../services/UserService').then(({ UserService }) => {
-      new UserService().recordAccess(userId, acceptLanguage).catch(() => {});
+      new UserService().recordAccess(userId, acceptLanguage).catch((err) => {
+        console.warn('[Auth] recordAccess failed', { userId, err: (err as Error)?.message });
+      });
     });
   };
 
