@@ -55,32 +55,44 @@ export class UserService {
         console.warn('[recordAccess] access log 실패', { userId, err: (err as Error)?.message });
       });
 
-    // 트랜잭션 + 내부 재조회로 race 차단:
-    // 동일 유저의 동시 호출 시 두 번째 트랜잭션도 갱신된 lastHeartGrantedAt 을 보고
-    // alreadyGrantedToday 판정이 일관되어 +2 지급을 막는다.
+    // race 차단의 핵심: SELECT 없이 updateMany WHERE 에 시간 조건을 박아
+    // atomic test-and-set 으로 처리한다.
+    //
+    // Postgres 의 UPDATE 는 row-lock 을 잡으면서 WHERE 를 재평가하므로,
+    // 여러 Lambda 인스턴스가 동시에 같은 row 를 갱신하려 해도 가장 먼저
+    // 커밋한 한 트랜잭션만 count=1 을 받는다. 이후 트랜잭션은 락이 풀린
+    // 시점의 lastHeartGrantedAt 이 이미 kstToday 이상이라 WHERE 가 false →
+    // count=0 → +0 으로 정확히 갈라진다.
+    //
+    // 이전 SELECT→UPDATE 패턴은 READ COMMITTED 격리에서 lost-update
+    // 인터리빙을 허용해 동시 N 호출 시 +N 까지 갈 수 있었음 (MG-76).
     await prisma.$transaction(async (tx) => {
-      const fresh = await tx.user.findUniqueOrThrow({ where: { id: user.id } });
-      const alreadyGrantedToday =
-        fresh.lastHeartGrantedAt != null && fresh.lastHeartGrantedAt >= kstToday;
+      const grantResult = await tx.user.updateMany({
+        where: {
+          id: user.id,
+          OR: [
+            { lastHeartGrantedAt: null },
+            { lastHeartGrantedAt: { lt: kstToday } },
+          ],
+        },
+        data: {
+          lastHeartGrantedAt: new Date(),
+          ...(resolvedLocale && user.locale !== resolvedLocale ? { locale: resolvedLocale } : {}),
+        },
+      });
 
-      if (!alreadyGrantedToday) {
-        await tx.user.update({
-          where: { id: fresh.id },
-          data: {
-            lastHeartGrantedAt: new Date(),
-            ...(resolvedLocale && fresh.locale !== resolvedLocale ? { locale: resolvedLocale } : {}),
-          },
-        });
-        if (fresh.familyId) {
+      if (grantResult.count > 0) {
+        // 우리가 오늘 첫 지급자.
+        if (user.familyId) {
           await tx.familyMembership.updateMany({
-            where: { userId: fresh.id, familyId: fresh.familyId },
+            where: { userId: user.id, familyId: user.familyId },
             data: { hearts: { increment: 1 } },
           });
         }
-      } else if (resolvedLocale && fresh.locale !== resolvedLocale) {
-        // 오늘 하트는 이미 지급됐지만 locale 이 바뀌었으면 그것만 반영
+      } else if (resolvedLocale && user.locale !== resolvedLocale) {
+        // 이미 지급됨. locale 만 동기화.
         await tx.user.update({
-          where: { id: fresh.id },
+          where: { id: user.id },
           data: { locale: resolvedLocale },
         });
       }
