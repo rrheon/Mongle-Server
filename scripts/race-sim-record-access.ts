@@ -9,17 +9,19 @@
  * 사용법: npx ts-node scripts/race-sim-record-access.ts
  */
 import { PrismaClient } from '@prisma/client';
-import { getKstToday } from '../src/utils/kst';
+import { getKstMidnightUtc } from '../src/utils/kst';
 
 const TARGET_EMAIL = 'mrdydgjs@naver.com';
 const CONCURRENCY = 10;
 
+// production 의 UserService.grantDailyHeartIfNeeded 와 같은 cutoff·WHERE 를
+// inline 으로 복제. 단 cutoff 는 시각 포함 컬럼용 헬퍼 사용 (MG-81).
 async function grantDailyHeartOnce(
   p: PrismaClient,
   userPk: string,
   familyId: string
 ) {
-  const kstToday = getKstToday();
+  const cutoff = getKstMidnightUtc();
   await p.userAccessLog.create({ data: { userId: userPk } }).catch(() => {});
   await p.familyMembership.updateMany({
     where: {
@@ -27,7 +29,7 @@ async function grantDailyHeartOnce(
       familyId,
       OR: [
         { lastHeartGrantedAt: null },
-        { lastHeartGrantedAt: { lt: kstToday } },
+        { lastHeartGrantedAt: { lt: cutoff } },
       ],
     },
     data: {
