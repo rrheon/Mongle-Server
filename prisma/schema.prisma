@@ -100,6 +100,11 @@ model FamilyMembership {
   colorId           String?   @default("loved") @map("color_id")
   nicknameChangedAt DateTime? @map("nickname_changed_at")
   skippedDate       DateTime? @map("skipped_date") @db.Date
+  // 그룹별 데일리 +1 지급 추적. User.lastHeartGrantedAt 의 글로벌 한계를
+  // 보완 — 같은 KST 날짜에 그룹 A→B 전환 시 두 그룹 모두 +1 받게 한다.
+  // atomic test-and-set: WHERE { lastHeartGrantedAt: null OR < kstToday } 으로
+  // 동시 호출에서도 정확히 1번만 갱신.
+  lastHeartGrantedAt DateTime? @map("last_heart_granted_at")
   family            Family    @relation(fields: [familyId], references: [id])
   user              User      @relation(fields: [userId], references: [id])
 

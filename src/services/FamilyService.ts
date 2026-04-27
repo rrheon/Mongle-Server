@@ -641,6 +641,7 @@ export class FamilyService {
       hearts: membership.hearts, // 그룹별 하트
       moodId: membership.colorId ?? membership.user.moodId ?? null, // 그룹별 색상 우선
       createdAt: membership.user.createdAt,
+      heartGrantedToday: false,
     };
   }
 
@@ -665,6 +666,7 @@ export class FamilyService {
       hearts: user.hearts,
       moodId: user.moodId ?? null,
       createdAt: user.createdAt,
+      heartGrantedToday: false,
     };
   }
 }

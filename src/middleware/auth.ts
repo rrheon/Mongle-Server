@@ -65,12 +65,14 @@ export async function expressAuthentication(
   const [bearer, token] = authHeader.split(' ');
   if (bearer !== 'Bearer' || !token) throw new Error('Invalid authorization header format');
 
-  // 매 요청의 Accept-Language 를 user.locale 로 동기화 → 푸시 다국어 문구 선택에 사용
+  // 매 요청의 Accept-Language 를 user.locale 로 동기화 → 푸시 다국어 문구 선택에 사용.
+  // 데일리 하트 +1 지급은 /users/me?grantDailyHeart=true 동기 경로로 분리됐으므로(MG-80)
+  // 여기선 access log + locale 동기화만 fire-and-forget 으로 수행한다.
   const acceptLanguage = request.headers['accept-language'] as string | undefined;
-  const recordAccessSilently = (userId: string) => {
+  const logAccessSilently = (userId: string) => {
     import('../services/UserService').then(({ UserService }) => {
-      new UserService().recordAccess(userId, acceptLanguage).catch((err) => {
-        console.warn('[Auth] recordAccess failed', { userId, err: (err as Error)?.message });
+      new UserService().logAccess(userId, acceptLanguage).catch((err) => {
+        console.warn('[Auth] logAccess failed', { userId, err: (err as Error)?.message });
       });
     });
   };
@@ -79,7 +81,7 @@ export async function expressAuthentication(
   try {
     const { verifyCustomToken } = await import('../utils/jwt');
     const payload = verifyCustomToken(token);
-    recordAccessSilently(payload.sub);
+    logAccessSilently(payload.sub);
     return { userId: payload.sub, email: payload.email };
   } catch {
     // 커스텀 JWT 아님, Cognito 토큰 시도
@@ -87,7 +89,7 @@ export async function expressAuthentication(
 
   try {
     const payload = await verifyToken(token);
-    recordAccessSilently(payload.sub);
+    logAccessSilently(payload.sub);
     return { userId: payload.sub, email: payload.email };
   } catch {
     throw new Error('Invalid or expired token');

@@ -17,6 +17,12 @@ export interface UserResponse {
   hearts: number;
   moodId: string | null;
   createdAt: Date;
+  /**
+   * /users/me?grantDailyHeart=true 호출 시점에 활성 그룹 데일리 하트 +1 이
+   * 이번 요청에서 발생했는지 여부. opt-in 이 아닌 호출에서는 항상 false.
+   * iOS 는 이 플래그로만 데일리 하트 팝업을 트리거한다 (MG-77).
+   */
+  heartGrantedToday: boolean;
 }
 
 export interface UpdateUserRequest {

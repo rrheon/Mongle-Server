@@ -7,6 +7,7 @@ import {
   Route,
   Body,
   Path,
+  Query,
   Security,
   Request,
   Tags,
@@ -23,13 +24,24 @@ export class UserController extends Controller {
 
   /**
    * 현재 로그인한 사용자 정보 조회
+   *
+   * grantDailyHeart=true 인 호출은 활성 그룹 데일리 하트(+1) 지급을 동기적으로
+   * 시도하고 응답의 heartGrantedToday 에 결과를 실어 보낸다. iOS 의 onAppear /
+   * refreshHomeData 에서만 켜고, QuestionDetail 같은 부수 hearts sync 호출은
+   * 기본값(false)으로 호출해 거짓 grant 를 방지한다 (MG-80, MG-77).
+   *
    * @summary 내 정보 조회
    */
   @Get('me')
   @Security('jwt')
   @SuccessResponse(200, '성공')
-  public async getMe(@Request() req: AuthRequest): Promise<UserResponse> {
-    return this.userService.getUserByUserId(req.user.userId);
+  public async getMe(
+    @Request() req: AuthRequest,
+    @Query() grantDailyHeart?: boolean
+  ): Promise<UserResponse> {
+    return this.userService.getUserByUserId(req.user.userId, {
+      grantDailyHeart: grantDailyHeart === true,
+    });
   }
 
   /**
