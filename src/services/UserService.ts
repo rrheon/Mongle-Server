@@ -1,7 +1,7 @@
 import prisma from '../utils/prisma';
 import { UserResponse, UpdateUserRequest } from '../models';
 import { Errors } from '../middleware/errorHandler';
-import { getKstToday } from '../utils/kst';
+import { getKstMidnightUtc } from '../utils/kst';
 import { resolveLocaleFromHeader } from '../utils/i18n/push';
 
 const MAX_AD_HEARTS = 5; // 1회 광고 시청 보상 최대 하트 수
@@ -92,19 +92,24 @@ export class UserService {
    *
    * hearts increment 도 같은 updateMany 안에 포함해 grant 와 +1 이 한
    * 트랜잭션·한 row 단위로 묶이게 한다 (분리하면 락 해제 사이 인터리빙 가능).
+   *
+   * cutoff 는 반드시 `getKstMidnightUtc()` 사용. lastHeartGrantedAt 은
+   * 시각 포함 DateTime 이라 `getKstToday()` 의 "KST 날짜를 UTC 자정 시각으로
+   * 표기" 패턴과 9시간 어긋나, KST 0~9시 윈도우에서 매 호출마다 grant 가
+   * 발생하던 결함이 있었음 (MG-81).
    */
   async grantDailyHeartIfNeeded(
     userPk: string,
     familyId: string
   ): Promise<{ granted: boolean }> {
-    const kstToday = getKstToday();
+    const cutoff = getKstMidnightUtc();
     const result = await prisma.familyMembership.updateMany({
       where: {
         userId: userPk,
         familyId,
         OR: [
           { lastHeartGrantedAt: null },
-          { lastHeartGrantedAt: { lt: kstToday } },
+          { lastHeartGrantedAt: { lt: cutoff } },
         ],
       },
       data: {

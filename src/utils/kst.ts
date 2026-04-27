@@ -12,11 +12,31 @@ const KST_TZ = 'Asia/Seoul';
 /**
  * KST 기준 "오늘" 을 UTC 자정으로 표현한 Date.
  * Prisma `@db.Date` 는 UTC 자정으로 저장되므로 비교/insert 에 안전.
+ *
+ * 주의: 시각 포함 DateTime (TIMESTAMP) 컬럼과의 cutoff 비교에는 쓰지 말 것.
+ * 반환값 `2026-04-28T00:00:00.000Z` 는 실제로는 KST 04-28 09:00 시각이라
+ * KST 0~9시 윈도우의 시각과 비교하면 9시간 어긋나 매번 미래로 보인다.
+ * 그 용도엔 `getKstMidnightUtc()` 사용.
  */
 export function getKstToday(): Date {
   const now = new Date();
   const kstDateStr = now.toLocaleDateString('en-CA', { timeZone: KST_TZ });
   return new Date(kstDateStr + 'T00:00:00.000Z');
+}
+
+/**
+ * 현재 시각이 속한 KST 일자의 0시(자정)을 UTC Date 로 반환.
+ *
+ * 시각 포함 DateTime (Postgres TIMESTAMP) 컬럼과 cutoff 비교할 때 사용.
+ * `getKstToday()` 는 `@db.Date` 호환을 위해 KST 날짜를 UTC 자정 시각으로 표기하므로
+ * (예: KST 04-28 의도 → `2026-04-28T00:00:00.000Z` UTC = KST 09:00 시각)
+ * TIMESTAMP cutoff 에 그대로 쓰면 KST 0~9시 사이에 매 비교가 항상 과거로 판정되는
+ * off-by-9h 결함이 발생한다 (MG-81: 데일리 하트 매 호출 +1 버그).
+ */
+export function getKstMidnightUtc(): Date {
+  const now = new Date();
+  const kstDateStr = now.toLocaleDateString('en-CA', { timeZone: KST_TZ });
+  return new Date(kstDateStr + 'T00:00:00.000+09:00');
 }
 
 /**
