@@ -453,6 +453,7 @@ export class AnswerService {
         hearts: answer.user.hearts,
         moodId: resolvedMoodId,
         createdAt: answer.user.createdAt,
+        heartGrantedToday: false,
       },
     };
   }

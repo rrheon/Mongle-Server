@@ -9,10 +9,26 @@ const MAX_AD_HEARTS = 5; // 1회 광고 시청 보상 최대 하트 수
 export class UserService {
   /**
    * userId로 사용자 조회 (현재 활성 가족의 그룹별 nickname, hearts, role 반환)
+   *
+   * options.grantDailyHeart=true 인 호출은 그룹별 데일리 하트(+1) 지급을
+   * 동기적으로 시도하고, 결과를 응답의 heartGrantedToday / hearts 에 반영한다.
+   * iOS 의 명시적 opt-in 경로(refreshHomeData / onAppear)에서만 켜고, 부수
+   * 호출(QuestionDetail/ProfileEdit hearts sync 등)은 default false 로 호출해
+   * "오늘 첫 호출이 부수 경로에서 발생해 grant 만 되고 팝업은 누락" 되는
+   * 시나리오를 막는다.
    */
-  async getUserByUserId(userId: string): Promise<UserResponse> {
+  async getUserByUserId(
+    userId: string,
+    options?: { grantDailyHeart?: boolean }
+  ): Promise<UserResponse> {
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) throw Errors.notFound('사용자');
+
+    let heartGrantedToday = false;
+    if (options?.grantDailyHeart && user.familyId) {
+      const result = await this.grantDailyHeartIfNeeded(user.id, user.familyId);
+      heartGrantedToday = result.granted;
+    }
 
     if (user.familyId) {
       const membership = await prisma.familyMembership.findUnique({
@@ -29,74 +45,74 @@ export class UserService {
           hearts: membership.hearts,
           moodId: membership.colorId ?? user.moodId ?? null,
           createdAt: user.createdAt,
+          heartGrantedToday,
         };
       }
     }
 
-    return this.toUserResponse(user);
+    return { ...this.toUserResponse(user), heartGrantedToday };
   }
 
   /**
-   * 접속 기록 저장 + 하루 첫 접속 시 활성 가족 그룹 하트 +1
+   * 접속 로그 + locale 동기화. heart 지급은 분리됨(grantDailyHeartIfNeeded).
+   *
+   * 이전 recordAccess 가 한 번에 묶고 있던 access log + locale + heart 지급
+   * 셋 중 heart 지급만 떼어 /users/me?grantDailyHeart=true 동기 경로로 이전
+   * (MG-80). 응답 본문에 heartGrantedToday 플래그를 실어 iOS 가 거짓 팝업
+   * 가능성 없이 정합 트리거하도록 만들기 위함.
    */
-  async recordAccess(userId: string, acceptLanguage?: string | null): Promise<void> {
+  async logAccess(userId: string, acceptLanguage?: string | null): Promise<void> {
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) return;
 
-    // KST 자정을 UTC 로 정규화 — Lambda 가 UTC 인 환경에서 KST 0~8시 요청이
-    // 전날로 잘못 묶이는 off-by-one 을 차단.
-    const kstToday = getKstToday();
-    const resolvedLocale = acceptLanguage ? resolveLocaleFromHeader(acceptLanguage) : null;
-
-    // 액세스 로그는 본 로직 영향 최소화를 위해 트랜잭션 밖에서 fire-and-forget
     prisma.userAccessLog
       .create({ data: { userId: user.id } })
       .catch((err) => {
-        console.warn('[recordAccess] access log 실패', { userId, err: (err as Error)?.message });
+        console.warn('[logAccess] access log 실패', { userId, err: (err as Error)?.message });
       });
 
-    // race 차단의 핵심: SELECT 없이 updateMany WHERE 에 시간 조건을 박아
-    // atomic test-and-set 으로 처리한다.
-    //
-    // Postgres 의 UPDATE 는 row-lock 을 잡으면서 WHERE 를 재평가하므로,
-    // 여러 Lambda 인스턴스가 동시에 같은 row 를 갱신하려 해도 가장 먼저
-    // 커밋한 한 트랜잭션만 count=1 을 받는다. 이후 트랜잭션은 락이 풀린
-    // 시점의 lastHeartGrantedAt 이 이미 kstToday 이상이라 WHERE 가 false →
-    // count=0 → +0 으로 정확히 갈라진다.
-    //
-    // 이전 SELECT→UPDATE 패턴은 READ COMMITTED 격리에서 lost-update
-    // 인터리빙을 허용해 동시 N 호출 시 +N 까지 갈 수 있었음 (MG-76).
-    await prisma.$transaction(async (tx) => {
-      const grantResult = await tx.user.updateMany({
-        where: {
-          id: user.id,
-          OR: [
-            { lastHeartGrantedAt: null },
-            { lastHeartGrantedAt: { lt: kstToday } },
-          ],
-        },
-        data: {
-          lastHeartGrantedAt: new Date(),
-          ...(resolvedLocale && user.locale !== resolvedLocale ? { locale: resolvedLocale } : {}),
-        },
-      });
-
-      if (grantResult.count > 0) {
-        // 우리가 오늘 첫 지급자.
-        if (user.familyId) {
-          await tx.familyMembership.updateMany({
-            where: { userId: user.id, familyId: user.familyId },
-            data: { hearts: { increment: 1 } },
-          });
-        }
-      } else if (resolvedLocale && user.locale !== resolvedLocale) {
-        // 이미 지급됨. locale 만 동기화.
-        await tx.user.update({
-          where: { id: user.id },
-          data: { locale: resolvedLocale },
+    const resolvedLocale = acceptLanguage ? resolveLocaleFromHeader(acceptLanguage) : null;
+    if (resolvedLocale && user.locale !== resolvedLocale) {
+      await prisma.user
+        .update({ where: { id: user.id }, data: { locale: resolvedLocale } })
+        .catch((err) => {
+          console.warn('[logAccess] locale 동기화 실패', { userId, err: (err as Error)?.message });
         });
-      }
+    }
+  }
+
+  /**
+   * 활성 그룹 데일리 하트 +1 (atomic test-and-set on FamilyMembership).
+   *
+   * race 차단 패턴은 MG-76 과 동일: SELECT 없이 updateMany WHERE 에 시간
+   * 조건을 박아 가장 먼저 커밋한 트랜잭션만 count=1 을 받게 한다. 이전
+   * 글로벌 User.lastHeartGrantedAt 기준이었을 땐 같은 KST 날짜에 그룹
+   * A→B 전환 시 새 그룹이 +0 으로 누락되는 결함이 있었음 (MG-80 design flaw).
+   * 이제 (userId, familyId) 키로 처리하므로 그룹별 매일 1개가 자연스럽게 보장.
+   *
+   * hearts increment 도 같은 updateMany 안에 포함해 grant 와 +1 이 한
+   * 트랜잭션·한 row 단위로 묶이게 한다 (분리하면 락 해제 사이 인터리빙 가능).
+   */
+  async grantDailyHeartIfNeeded(
+    userPk: string,
+    familyId: string
+  ): Promise<{ granted: boolean }> {
+    const kstToday = getKstToday();
+    const result = await prisma.familyMembership.updateMany({
+      where: {
+        userId: userPk,
+        familyId,
+        OR: [
+          { lastHeartGrantedAt: null },
+          { lastHeartGrantedAt: { lt: kstToday } },
+        ],
+      },
+      data: {
+        lastHeartGrantedAt: new Date(),
+        hearts: { increment: 1 },
+      },
     });
+    return { granted: result.count > 0 };
   }
 
   /**
@@ -359,6 +375,7 @@ export class UserService {
       hearts: user.hearts,
       moodId: user.moodId ?? null,
       createdAt: user.createdAt,
+      heartGrantedToday: false,
     };
   }
 }
