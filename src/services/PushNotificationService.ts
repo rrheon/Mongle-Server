@@ -46,7 +46,12 @@ export class PushNotificationService {
   }
 
   /** FCM 푸시 알림 발송 (Android).
-   * notificationId 를 data 에 포함해 클라가 알림 탭 시 자동 markAsRead 호출에 사용 (MG-111). */
+   * data-only 페이로드로 발송 — notification 필드를 함께 보내면 안드로이드 백그라운드/종료
+   * 상태에서 OS 자동 처리 경로로 빠져 onMessageReceived 가 호출되지 않고, 클라가 정의한
+   * mongle_default 채널 대신 시스템 폴백 채널이 사용돼 헤드업 미노출/제조사 백그라운드
+   * 제한 등으로 알림이 누락된다. data-only + high priority + ttl=0 으로 항상 클라가
+   * 알림을 빌드하도록 보장. (MG-111)
+   * notificationId 를 data 에 포함해 클라가 알림 탭 시 자동 markAsRead 호출에 사용. */
   async sendFcmPush(fcmToken: string, title: string, body: string, type: string, colorId?: string, notificationId?: string): Promise<void> {
     initFirebase();
     if (admin.apps.length === 0) {
@@ -56,9 +61,14 @@ export class PushNotificationService {
     try {
       await admin.messaging().send({
         token: fcmToken,
-        notification: { title, body },
-        data: { type, ...(colorId && { colorId }), ...(notificationId && { notificationId }) },
-        android: { priority: 'high' },
+        data: {
+          title,
+          body,
+          type,
+          ...(colorId && { colorId }),
+          ...(notificationId && { notificationId }),
+        },
+        android: { priority: 'high', ttl: 0 },
       });
     } catch (e: unknown) {
       const errorCode = (e as { code?: string })?.code;
