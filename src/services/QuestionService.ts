@@ -675,15 +675,19 @@ async function notifyNewQuestion(familyId: string): Promise<void> {
 
   // 1단계: DB 알림 저장 — 푸시의 badge 카운트가 새 알림을 포함해 정확히 반영되도록
   // 모든 createNotification 을 먼저 await. AnswerService.MEMBER_ANSWERED 와 동일 패턴.
+  // 생성된 알림 ID 를 멤버별 Map 으로 캡쳐 → 푸시 페이로드의 notificationId 로 사용 (MG-111).
+  const notificationIdByMember = new Map<string, string>();
   const dbNotifTasks: Promise<unknown>[] = [];
   for (const m of members) {
     const msgs = getPushMessages(m.locale);
     const title = msgs.newQuestion.title;
     const body = msgs.newQuestion.body;
     dbNotifTasks.push(
-      notifSvc.createNotification(m.id, 'NEW_QUESTION', title, body, familyId).catch((e) => {
-        console.warn(`[notifyNewQuestion] DB 알림 실패 user=${m.id} family=${familyId}:`, e);
-      })
+      notifSvc.createNotification(m.id, 'NEW_QUESTION', title, body, familyId)
+        .then((notifId) => { notificationIdByMember.set(m.id, notifId); })
+        .catch((e) => {
+          console.warn(`[notifyNewQuestion] DB 알림 실패 user=${m.id} family=${familyId}:`, e);
+        })
     );
   }
   await Promise.all(dbNotifTasks);
@@ -696,12 +700,13 @@ async function notifyNewQuestion(familyId: string): Promise<void> {
     const msgs = getPushMessages(m.locale);
     const title = msgs.newQuestion.title;
     const body = msgs.newQuestion.body;
+    const notifId = notificationIdByMember.get(m.id);
 
     if (m.apnsToken) {
       pushTasks.push(
         (async () => {
           const badge = await notifSvc.getUnreadCount(m.id);
-          await pushSvc.sendApnsPush(m.apnsToken!, title, body, 'NEW_QUESTION', badge, m.apnsEnvironment);
+          await pushSvc.sendApnsPush(m.apnsToken!, title, body, 'NEW_QUESTION', badge, m.apnsEnvironment, notifId);
         })().catch((e) => {
           console.warn(`[notifyNewQuestion] APNs 실패 user=${m.id}:`, e);
         })
@@ -709,7 +714,7 @@ async function notifyNewQuestion(familyId: string): Promise<void> {
     }
     if (m.fcmToken) {
       pushTasks.push(
-        pushSvc.sendFcmPush(m.fcmToken, title, body, 'NEW_QUESTION').catch((e) => {
+        pushSvc.sendFcmPush(m.fcmToken, title, body, 'NEW_QUESTION', undefined, notifId).catch((e) => {
           console.warn(`[notifyNewQuestion] FCM 실패 user=${m.id}:`, e);
         })
       );

@@ -116,16 +116,20 @@ export class AnswerService {
       // Lambda에서는 fire-and-forget 패턴이 안 됨 — 핸들러가 응답하면 runtime이 frozen 처리되어
       // 백그라운드 HTTP/2 APNs 연결이 중단됨. 모든 푸시 작업을 await 처리.
 
-      // 1단계: DB 알림 저장 (뱃지 카운트 조회 전에 완료해야 정확한 수치 반영)
+      // 1단계: DB 알림 저장 (뱃지 카운트 조회 전에 완료해야 정확한 수치 반영).
+      // 생성된 알림 ID 를 멤버별 Map 으로 캡쳐 → 푸시 페이로드의 notificationId 로 사용 (MG-111).
+      const notificationIdByMember = new Map<string, string>();
       const dbNotifTasks: Promise<unknown>[] = [];
       for (const member of otherMembers) {
         const msgs = getPushMessages(member.locale);
         const title = msgs.memberAnswered.title(senderNickname);
         const body = msgs.memberAnswered.body;
         dbNotifTasks.push(
-          notificationService.createNotification(member.id, 'MEMBER_ANSWERED', title, body, user.familyId, senderColorId).catch((e) => {
-            console.warn('[Answer] 알림 저장 실패:', e);
-          })
+          notificationService.createNotification(member.id, 'MEMBER_ANSWERED', title, body, user.familyId, senderColorId)
+            .then((notifId) => { notificationIdByMember.set(member.id, notifId); })
+            .catch((e) => {
+              console.warn('[Answer] 알림 저장 실패:', e);
+            })
         );
       }
       await Promise.all(dbNotifTasks);
@@ -139,12 +143,13 @@ export class AnswerService {
         const msgs = getPushMessages(member.locale);
         const title = msgs.memberAnswered.title(senderNickname);
         const body = msgs.memberAnswered.body;
+        const notifId = notificationIdByMember.get(member.id);
 
         if (member.apnsToken) {
           pushTasks.push(
             (async () => {
               const badgeCount = await notificationService.getUnreadCount(member.id);
-              await pushService.sendApnsPush(member.apnsToken!, title, body, 'MEMBER_ANSWERED', badgeCount, member.apnsEnvironment);
+              await pushService.sendApnsPush(member.apnsToken!, title, body, 'MEMBER_ANSWERED', badgeCount, member.apnsEnvironment, notifId);
             })().catch((e) => {
               console.warn('[Answer] APNs 푸시 실패:', e);
             })
@@ -152,7 +157,7 @@ export class AnswerService {
         }
         if (member.fcmToken) {
           pushTasks.push(
-            pushService.sendFcmPush(member.fcmToken, title, body, 'MEMBER_ANSWERED', senderColorId).catch((e) => {
+            pushService.sendFcmPush(member.fcmToken, title, body, 'MEMBER_ANSWERED', senderColorId, notifId).catch((e) => {
               console.warn('[Answer] FCM 푸시 실패:', e);
             })
           );

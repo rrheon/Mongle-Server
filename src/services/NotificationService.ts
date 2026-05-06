@@ -66,7 +66,8 @@ export class NotificationService {
     return { count: result.count };
   }
 
-  /** 내부적으로 알림 생성 (다른 서비스에서 호출) */
+  /** 내부적으로 알림 생성 (다른 서비스에서 호출). 생성된 알림 ID 를 반환해
+   *  푸시 페이로드에 notificationId 로 실어 보낼 수 있도록 한다 (MG-111). */
   async createNotification(
     userId: string,
     type: NotificationType,
@@ -74,8 +75,11 @@ export class NotificationService {
     body: string,
     familyId?: string,
     colorId?: string
-  ): Promise<void> {
-    await prisma.notification.create({ data: { userId, type, title, body, familyId: familyId ?? null, colorId: colorId ?? null } });
+  ): Promise<string> {
+    const created = await prisma.notification.create({
+      data: { userId, type, title, body, familyId: familyId ?? null, colorId: colorId ?? null },
+    });
+    return created.id;
   }
 
   /** 유저의 미읽음 알림 수 (뱃지 카운트용). userId 는 User.id (내부 UUID). 푸시 서비스용. */

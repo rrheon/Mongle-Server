@@ -178,6 +178,9 @@ export async function sendDailyReminders(): Promise<void> {
   }
 
   // DB 알림 — (유저, 가족) 단위 1건. 본인이 해당 가족에서 미답변이면 미답변자 문구, 아니면 답변자 문구.
+  // 한 유저가 여러 가족 소속이면 여러 알림 생성되지만 푸시는 유저당 1회 발송 → 첫 알림 ID 만
+  // 페이로드 notificationId 로 포함해 클라가 자동 markAsRead. 나머지 가족 REMINDER 는 알림함에서 정리. (MG-111)
+  const firstNotifIdByUser = new Map<string, string>();
   const dbNotifTasks: Promise<unknown>[] = [];
   for (const entry of dbNotifByKey.values()) {
     const user = userInfoMap.get(entry.userId);
@@ -186,6 +189,11 @@ export async function sendDailyReminders(): Promise<void> {
     dbNotifTasks.push(
       notificationService
         .createNotification(entry.userId, 'REMINDER', title, body, entry.familyId)
+        .then((notifId) => {
+          if (!firstNotifIdByUser.has(entry.userId)) {
+            firstNotifIdByUser.set(entry.userId, notifId);
+          }
+        })
         .catch((e) => {
           console.warn('[Reminder] 알림 저장 실패:', e);
         })
@@ -215,6 +223,7 @@ export async function sendDailyReminders(): Promise<void> {
     const { title, body } = makeBody(user.locale, unanswered);
     const badgeCount = unreadByUser.get(userId) ?? 0;
 
+    const notifId = firstNotifIdByUser.get(userId);
     if (user.apnsToken) {
       pushTasks.push(
         pushService.sendApnsPush(
@@ -223,7 +232,8 @@ export async function sendDailyReminders(): Promise<void> {
           body,
           'REMINDER',
           badgeCount,
-          user.apnsEnvironment
+          user.apnsEnvironment,
+          notifId
         ).catch((e) => {
           console.warn('[Reminder] APNs 푸시 실패:', e);
         })
@@ -232,7 +242,7 @@ export async function sendDailyReminders(): Promise<void> {
     if (user.fcmToken) {
       pushTasks.push(
         pushService
-          .sendFcmPush(user.fcmToken, title, body, 'REMINDER')
+          .sendFcmPush(user.fcmToken, title, body, 'REMINDER', undefined, notifId)
           .catch((e) => {
             console.warn('[Reminder] FCM 푸시 실패:', e);
           })
