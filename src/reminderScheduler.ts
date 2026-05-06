@@ -224,13 +224,18 @@ export async function sendDailyReminders(): Promise<void> {
     const badgeCount = unreadByUser.get(userId) ?? 0;
 
     const notifId = firstNotifIdByUser.get(userId);
+    // MG-116 — 클라가 알림 탭 시 본인 미답변 여부에 따라 답변 화면 vs 홈 화면으로 분기
+    // 할 수 있도록 push payload type 에 suffix 부여. DB Notification.type 은 'REMINDER'
+    // 그대로 유지(알림함 라우팅 영향 없음). 여러 가족 소속이면 어느 가족에서든
+    // 본인 미답변이 1건이라도 있으면 unanswered=true.
+    const pushType = unanswered ? 'REMINDER_UNANSWERED' : 'REMINDER_ANSWERED';
     if (user.apnsToken) {
       pushTasks.push(
         pushService.sendApnsPush(
           user.apnsToken!,
           title,
           body,
-          'REMINDER',
+          pushType,
           badgeCount,
           user.apnsEnvironment,
           notifId
@@ -242,7 +247,7 @@ export async function sendDailyReminders(): Promise<void> {
     if (user.fcmToken) {
       pushTasks.push(
         pushService
-          .sendFcmPush(user.fcmToken, title, body, 'REMINDER', undefined, notifId)
+          .sendFcmPush(user.fcmToken, title, body, pushType, undefined, notifId)
           .catch((e) => {
             console.warn('[Reminder] FCM 푸시 실패:', e);
           })
