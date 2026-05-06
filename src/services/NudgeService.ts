@@ -105,7 +105,8 @@ export class NudgeService {
     const nudgeTitle = msgs.nudge.title;
     const nudgeBody = msgs.nudge.body(senderNickname);
 
-    await notificationService.createNotification(
+    // 생성된 알림 ID 를 푸시 페이로드의 notificationId 로 전달 → 클라 자동 markAsRead (MG-111)
+    const nudgeNotificationId = await notificationService.createNotification(
       target.id,
       'ANSWER_REQUEST',
       nudgeTitle,
@@ -122,7 +123,7 @@ export class NudgeService {
         pushTasks.push(
           (async () => {
             const badgeCount = await notificationService.getUnreadCount(target.id);
-            await pushService.sendApnsPush(target.apnsToken!, nudgeTitle, nudgeBody, 'ANSWER_REQUEST', badgeCount, target.apnsEnvironment);
+            await pushService.sendApnsPush(target.apnsToken!, nudgeTitle, nudgeBody, 'ANSWER_REQUEST', badgeCount, target.apnsEnvironment, nudgeNotificationId);
           })().catch((e) => {
             console.warn('[Nudge] APNs 푸시 실패:', e);
           })
@@ -134,7 +135,9 @@ export class NudgeService {
             target.fcmToken,
             nudgeTitle,
             nudgeBody,
-            'ANSWER_REQUEST'
+            'ANSWER_REQUEST',
+            undefined,
+            nudgeNotificationId
           ).catch((e) => {
             console.warn('[Nudge] FCM 푸시 실패:', e);
           })

@@ -45,8 +45,9 @@ export class PushNotificationService {
     );
   }
 
-  /** FCM 푸시 알림 발송 (Android) */
-  async sendFcmPush(fcmToken: string, title: string, body: string, type: string, colorId?: string): Promise<void> {
+  /** FCM 푸시 알림 발송 (Android).
+   * notificationId 를 data 에 포함해 클라가 알림 탭 시 자동 markAsRead 호출에 사용 (MG-111). */
+  async sendFcmPush(fcmToken: string, title: string, body: string, type: string, colorId?: string, notificationId?: string): Promise<void> {
     initFirebase();
     if (admin.apps.length === 0) {
       console.warn('[FCM] Firebase 미초기화 — 푸시 발송 건너뜀');
@@ -56,7 +57,7 @@ export class PushNotificationService {
       await admin.messaging().send({
         token: fcmToken,
         notification: { title, body },
-        data: { type, ...(colorId && { colorId }) },
+        data: { type, ...(colorId && { colorId }), ...(notificationId && { notificationId }) },
         android: { priority: 'high' },
       });
     } catch (e: unknown) {
@@ -77,19 +78,22 @@ export class PushNotificationService {
 
   /** APNs 푸시 알림 범용 발송.
    * environment: 'sandbox' | 'production' — 유저 레코드에 저장된 값을 그대로 전달.
-   * 미지정(undefined/null) 시 서버의 NODE_ENV 기반 fallback을 사용. (MG-22) */
+   * 미지정(undefined/null) 시 서버의 NODE_ENV 기반 fallback을 사용. (MG-22)
+   * notificationId 를 페이로드에 포함해 클라가 알림 탭 시 자동 markAsRead 호출에 사용 (MG-111). */
   async sendApnsPush(
     deviceToken: string,
     title: string,
     body: string,
     type: string,
     badgeCount?: number,
-    environment?: 'sandbox' | 'production' | null
+    environment?: 'sandbox' | 'production' | null,
+    notificationId?: string
   ): Promise<void> {
     if (!this.keyId || !this.teamId || !this.bundleId || !this.rawKey) return;
     const payload = JSON.stringify({
       aps: { alert: { title, body }, sound: 'default', badge: badgeCount ?? 1 },
       type,
+      ...(notificationId && { notificationId }),
     });
     return this._sendApnsPayload(deviceToken, payload, environment);
   }
@@ -171,16 +175,19 @@ export class PushNotificationService {
     });
   }
 
-  /** 재촉하기 푸시 알림 발송 */
+  /** 재촉하기 푸시 알림 발송.
+   * notificationId 를 포함해 클라가 알림 탭 시 자동 markAsRead 호출에 사용 (MG-111). */
   async sendNudgePush(
     deviceToken: string,
     senderName: string,
     badgeCount?: number,
-    environment?: 'sandbox' | 'production' | null
+    environment?: 'sandbox' | 'production' | null,
+    notificationId?: string
   ): Promise<void> {
     const payload = JSON.stringify({
       aps: { alert: { title: '재촉하기 알림', body: `${senderName}님이 오늘의 질문에 답변해달라고 합니다` }, sound: 'default', badge: badgeCount ?? 1 },
       type: 'ANSWER_REQUEST',
+      ...(notificationId && { notificationId }),
     });
     return this._sendApnsPayload(deviceToken, payload, environment);
   }
