@@ -202,25 +202,115 @@ export class PushNotificationService {
     return this._sendApnsPayload(deviceToken, payload, environment);
   }
 
-  /** APNs HTTP/2 공통 발송.
+  /** APNs HTTP/2 발송 + production→sandbox 자동 fallback.
+   *
+   * 클라이언트가 environment 를 잘못 보고하는 케이스 (예: SPM 캐시 영향으로 DEBUG 빌드인데
+   * production 으로 등록되는 결함 — MG-114) 를 안전망으로 차단. production 호스트에서
+   * BadDeviceToken 을 받으면 sandbox 호스트로 재시도하고, 성공 시 DB 의 apnsEnvironment 를
+   * 자동으로 sandbox 로 정정해 다음 발송부터는 처음부터 올바른 호스트가 선택되도록 한다.
+   * (MG-115)
+   *
    * environment 지정 시 토큰별로 sandbox/production 호스트 선택. 미지정 시 서버 NODE_ENV fallback. (MG-22) */
-  private _sendApnsPayload(
+  private async _sendApnsPayload(
     deviceToken: string,
     payload: string,
     environment?: 'sandbox' | 'production' | null
   ): Promise<void> {
     if (!this.keyId || !this.teamId || !this.bundleId || !this.rawKey) {
       console.warn('[APNs] 환경변수 미설정 — 푸시 발송 건너뜀 (APNS_KEY_ID/TEAM_ID/BUNDLE_ID/PRIVATE_KEY)');
-      return Promise.resolve();
+      return;
     }
 
     const isProduction = environment ? environment === 'production' : this.isProduction;
-    const host = isProduction ? 'api.push.apple.com' : 'api.sandbox.push.apple.com';
+    const initialEnv: 'sandbox' | 'production' = isProduction ? 'production' : 'sandbox';
 
-    return new Promise<void>((resolve) => {
+    const r1 = await this._sendApnsPayloadOnce(deviceToken, payload, initialEnv);
+    if (r1.ok) return;
+
+    // production 호스트에서 BadDeviceToken — 클라가 environment 잘못 보고했을 가능성.
+    // sandbox 로 재시도해 deliver 보장 + 성공 시 DB env 자동 정정.
+    if (initialEnv === 'production' && this._isBadDeviceToken(r1.status, r1.body)) {
+      const r2 = await this._sendApnsPayloadOnce(deviceToken, payload, 'sandbox');
+      if (r2.ok) {
+        try {
+          const prisma = (await import('../utils/prisma')).default;
+          const result = await prisma.user.updateMany({
+            where: { apnsToken: deviceToken },
+            data: { apnsEnvironment: 'sandbox' },
+          });
+          if (result.count > 0) {
+            console.warn(
+              `[APNs] sandbox fallback 성공 → env 자동 정정 ${result.count}건 (token=${deviceToken.substring(0, 8)}...)`
+            );
+          }
+        } catch (e) {
+          console.error('[APNs] env 정정 실패:', e);
+        }
+        return;
+      }
+      // sandbox 도 실패 — 진짜 잘못된 토큰. invalidate 결정에 r2 결과 사용.
+      if (this._isTokenInvalidResponse(r2.status, r2.body)) {
+        await this.invalidateApnsToken(deviceToken).catch((e) => {
+          console.error('[APNs] 토큰 무효화 실패:', e);
+        });
+      }
+      return;
+    }
+
+    // 일반 토큰 invalid 케이스 (410 Gone, BadDeviceToken 외 token-invalid reasons)
+    if (this._isTokenInvalidResponse(r1.status, r1.body)) {
+      await this.invalidateApnsToken(deviceToken).catch((e) => {
+        console.error('[APNs] 토큰 무효화 실패:', e);
+      });
+    }
+  }
+
+  /** 400 응답 + reason=BadDeviceToken 감지 — production→sandbox fallback 트리거 조건. */
+  private _isBadDeviceToken(status: number | undefined, body: string | undefined): boolean {
+    if (status !== 400 || !body) return false;
+    try {
+      return (JSON.parse(body) as { reason?: string }).reason === 'BadDeviceToken';
+    } catch {
+      return false;
+    }
+  }
+
+  /** 토큰을 무효화해야 하는 응답인지. 410 Gone 또는 400 + 토큰-invalid reason 류.
+   * 페이로드/설정 오류(BadCertificate, BadTopic 등) 는 false — 토큰 보존. */
+  private _isTokenInvalidResponse(status: number | undefined, body: string | undefined): boolean {
+    if (status === 410) return true;
+    if (status !== 400 || !body) return false;
+    try {
+      const reason = (JSON.parse(body) as { reason?: string }).reason;
+      const tokenInvalidReasons = new Set([
+        'BadDeviceToken',
+        'Unregistered',
+        'DeviceTokenNotForTopic',
+        'TopicDisallowed',
+      ]);
+      return !!reason && tokenInvalidReasons.has(reason);
+    } catch {
+      return false;
+    }
+  }
+
+  /** APNs HTTP/2 단일 발송. 결과(ok/status/body) 를 반환만 하고 invalidate 는 호출자 책임.
+   * fallback wrapper(_sendApnsPayload) 가 production/sandbox 결과 종합해 invalidate 결정. */
+  private _sendApnsPayloadOnce(
+    deviceToken: string,
+    payload: string,
+    environment: 'sandbox' | 'production'
+  ): Promise<{ ok: boolean; status?: number; body?: string }> {
+    const host = environment === 'production' ? 'api.push.apple.com' : 'api.sandbox.push.apple.com';
+
+    return new Promise((resolve) => {
       try {
         const client = http2.connect(`https://${host}`, { rejectUnauthorized: true });
-        client.on('error', (e) => { console.error('[APNs] HTTP/2 연결 오류:', e); client.destroy(); resolve(); });
+        client.on('error', (e) => {
+          console.error('[APNs] HTTP/2 연결 오류:', e);
+          client.destroy();
+          resolve({ ok: false });
+        });
 
         const headers: http2.OutgoingHttpHeaders = {
           ':method': 'POST',
@@ -235,49 +325,32 @@ export class PushNotificationService {
         };
 
         const req = client.request(headers);
+        let respBody = '';
+        let status: number | undefined;
         req.on('response', (resHeaders) => {
-          const status = resHeaders[':status'];
-          if (status !== 200) {
-            let body = '';
-            req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
-            req.on('end', () => {
-              console.error(`[APNs] 푸시 실패 status=${status} token=${deviceToken.substring(0, 8)}...`, body);
-              // 410 Gone = 토큰 만료/미설치. 항상 무효화.
-              // 400 Bad Request 는 토큰 외 사유(BadCertificate, BadTopic, BadMessageId,
-              // BadPriority 등 페이로드/설정 오류)도 포함되므로 reason 을 확인해
-              // 토큰-invalid 류만 정리. reason 미상이면 안전 측 보존.
-              const tokenInvalidReasons = new Set([
-                'BadDeviceToken',
-                'Unregistered',
-                'DeviceTokenNotForTopic',
-                'TopicDisallowed',
-              ]);
-              let shouldInvalidate = status === 410;
-              if (status === 400) {
-                try {
-                  const reason = (JSON.parse(body) as { reason?: string }).reason;
-                  if (reason && tokenInvalidReasons.has(reason)) shouldInvalidate = true;
-                } catch {
-                  // body 파싱 실패 시 토큰 손상 단정 불가 → 보존
-                }
-              }
-              if (shouldInvalidate) {
-                this.invalidateApnsToken(deviceToken).catch((e) => {
-                  console.error('[APNs] 토큰 무효화 실패:', e);
-                });
-              }
-              client.close(); resolve();
-            });
-          } else {
-            client.close(); resolve();
-          }
+          status = Number(resHeaders[':status']);
         });
-        req.on('error', (e) => { console.error('[APNs] 요청 오류:', e); client.destroy(); resolve(); });
+        req.on('data', (chunk: Buffer) => { respBody += chunk.toString(); });
+        req.on('end', () => {
+          client.close();
+          if (status !== 200) {
+            console.error(
+              `[APNs] 푸시 실패 host=${host} status=${status} token=${deviceToken.substring(0, 8)}...`,
+              respBody
+            );
+          }
+          resolve({ ok: status === 200, status, body: respBody });
+        });
+        req.on('error', (e) => {
+          console.error('[APNs] 요청 오류:', e);
+          client.destroy();
+          resolve({ ok: false, status, body: respBody });
+        });
         req.write(payload);
         req.end();
       } catch (e) {
         console.error('[APNs] 예외:', e);
-        resolve();
+        resolve({ ok: false });
       }
     });
   }
