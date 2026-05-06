@@ -59,57 +59,64 @@ export function createApp(): Express {
   // 대신 페이지 로드 즉시 monggle://join/CODE 커스텀 스킴으로 자동 전환한다.
   // (앱이 설치된 경우만 대상이며, 설치되지 않았다면 페이지가 그대로 남음.)
   const APP_STORE_URL = 'https://apps.apple.com/kr/app/%EB%AA%BD%EA%B8%80-monggle/id6761920716';
+  const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.ycompany.Monggle&hl=ko';
 
-  const inviteLandingHandler = (req: Request, res: Response) => {
-    const code = (req.params.code || '').toUpperCase();
-    // 커스텀 스킴은 영숫자/대문자만 — 코드가 이상하면 XSS 방지 차원에서 막아둔다.
-    const safeCode = /^[A-Z0-9]{1,16}$/.test(code) ? code : '';
-    const deepLink = safeCode ? `monggle://join/${safeCode}` : '';
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(`<!DOCTYPE html>
+  // 초대 링크/일반 다운로드 페이지 공통 렌더링.
+  // safeCode 가 있으면 초대 코드 박스 + 자동 딥링크 시도, 없으면 단순 다운로드 페이지.
+  const renderLandingPage = (safeCode: string): string => {
+    const isInvite = safeCode.length > 0;
+    const title = isInvite ? '몽글 초대' : '몽글 다운로드';
+    const subtitle = isInvite
+      ? '가족이 초대 링크를 보냈어요.<br>몽글에서 함께해요!'
+      : '가족과 매일 한 가지 질문으로<br>가까워지는 시간.';
+    const deepLink = isInvite ? `monggle://join/${safeCode}` : '';
+    const codeBoxHtml = isInvite
+      ? `    <div class="code-box">
+      <div class="code-label">초대 코드</div>
+      <div class="code">${safeCode}</div>
+    </div>
+    <a class="open-btn" id="openAppBtn" href="monggle://join/${safeCode}">앱에서 열기</a>
+    <p class="hint">처음이라면 아래 스토어에서 다운로드하세요.</p>`
+      : `    <p class="hint hint-block">아래 스토어에서 다운로드하세요.</p>`;
+    return `<!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>몽글 초대</title>
+  <title>${title}</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:linear-gradient(180deg,#FFF8F0 0%,#EFF8F1 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
     .card{background:#fff;border-radius:20px;padding:40px 32px;max-width:360px;width:100%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.08)}
     .logo{margin-bottom:16px}
+    .logo img{display:block;margin:0 auto;width:88px;height:88px;border-radius:24px;object-fit:cover}
     h1{font-size:24px;font-weight:700;color:#1A1A1A;margin-bottom:8px}
     .subtitle{font-size:15px;color:#888;margin-bottom:32px;line-height:1.5}
     .code-box{background:#F0F9F2;border-radius:12px;padding:20px;margin-bottom:24px}
     .code-label{font-size:12px;color:#56A96B;font-weight:600;margin-bottom:8px}
     .code{font-size:28px;font-weight:700;letter-spacing:6px;color:#56A96B}
-    .open-btn{display:block;width:100%;padding:16px;background:#56A96B;color:#fff;border:none;border-radius:14px;font-size:16px;font-weight:600;cursor:pointer;text-decoration:none;margin-bottom:12px}
+    .open-btn{display:block;width:100%;padding:16px;background:#56A96B;color:#fff;border:none;border-radius:14px;font-size:16px;font-weight:600;cursor:pointer;text-decoration:none;margin-bottom:16px}
     .open-btn:active{opacity:.8}
-    .hint{font-size:12px;color:#AAA;line-height:1.6}
-    .hint a{color:#56A96B;text-decoration:underline}
-    .store-links{font-size:13px;color:#888;margin-top:8px}
-    .store-links a{color:#56A96B;text-decoration:underline;font-weight:600}
-    .store-links .disabled{color:#CCC;text-decoration:none;cursor:default}
+    .hint{font-size:12px;color:#AAA;line-height:1.6;margin-bottom:12px}
+    .hint-block{font-size:13px;margin-bottom:16px}
+    .store-badges{display:flex;justify-content:center;gap:8px;align-items:center}
+    .store-badges a{flex:1 1 0;max-width:144px;line-height:0}
+    .store-badges img{width:100%;height:auto;display:block}
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="logo"><svg width="64" height="64" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="#66BB6A"/><circle cx="24" cy="30" r="5" fill="#1A1A1A"/><circle cx="24" cy="30" r="4" fill="#1A1A1A" stroke="#fff" stroke-width="1.5"/><circle cx="40" cy="30" r="5" fill="#1A1A1A"/><circle cx="40" cy="30" r="4" fill="#1A1A1A" stroke="#fff" stroke-width="1.5"/></svg></div>
-    <h1>몽글 초대</h1>
-    <p class="subtitle">가족이 초대 링크를 보냈어요.<br>몽글에서 함께해요!</p>
-    <div class="code-box">
-      <div class="code-label">초대 코드</div>
-      <div class="code">${safeCode || '--------'}</div>
+    <div class="logo"><img src="/logo.png" alt="몽글" width="88" height="88"></div>
+    <h1>${title}</h1>
+    <p class="subtitle">${subtitle}</p>
+${codeBoxHtml}
+    <div class="store-badges">
+      <a href="${APP_STORE_URL}" target="_blank" rel="noopener"><img class="apple" src="/badge-appstore.svg" alt="App Store에서 다운로드"></a>
+      <a href="${PLAY_STORE_URL}" target="_blank" rel="noopener"><img class="google" src="/badge-googleplay.png" alt="Google Play에서 받기"></a>
     </div>
-    <a class="open-btn" id="openAppBtn" href="monggle://join/${safeCode}">앱에서 열기</a>
-    <p class="hint">몽글 앱이 설치되어 있는지 확인해 주세요.</p>
-    <p class="store-links">
-      <a href="${APP_STORE_URL}">iOS 설치</a>
-      &nbsp;|&nbsp;
-      <span class="disabled">안드로이드 설치 (준비중)</span>
-    </p>
   </div>
   <script>
-    // 커스텀 스킴으로 앱 열기 시도
+    // 커스텀 스킴으로 앱 열기 시도 (초대 코드가 있을 때만)
     // 앱이 설치되어 있으면 스킴 호출로 앱이 열리고, 없으면 페이지가 그대로 남음.
     (function () {
       var deepLink = ${JSON.stringify(deepLink)};
@@ -118,10 +125,24 @@ export function createApp(): Express {
     })();
   </script>
 </body>
-</html>`);
+</html>`;
+  };
+
+  const inviteLandingHandler = (req: Request, res: Response) => {
+    const code = (req.params.code || '').toUpperCase();
+    // 커스텀 스킴은 영숫자/대문자만 — 코드가 이상하면 XSS 방지 차원에서 막아둔다.
+    const safeCode = /^[A-Z0-9]{1,16}$/.test(code) ? code : '';
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderLandingPage(safeCode));
+  };
+  const installLandingHandler = (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderLandingPage(''));
   };
   app.get('/join/:code', inviteLandingHandler);
   app.get('/invite/:code', inviteLandingHandler);
+  app.get('/install', installLandingHandler);
+  app.get('/download', installLandingHandler);
 
   // Apple Sign-In 콜백 (Android용 — Custom Tab OAuth form_post 플로우)
   //

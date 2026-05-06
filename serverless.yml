@@ -7,6 +7,7 @@ package:
   include:
     - dist/swagger.json  # 👈 이 줄을 정확히 추가해 주세요!
     - src/swagger.json   # (혹시 모르니 src 폴더용도 같이 넣어두면 안전합니다)
+    - public/**          # 정적 자산 (logo.png, 스토어 배지, .well-known/*) — express.static 으로 서빙
 provider:
   name: aws
   runtime: nodejs20.x
