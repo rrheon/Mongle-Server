@@ -76,6 +76,7 @@ export async function sendDailyReminders(): Promise<void> {
       userId: true,
       familyId: true,
       skippedDate: true,
+      joinedAt: true, // MG-129: 합류 시점 이전 DQ 는 답변 의무 없음 — 필터에 사용
       user: {
         select: {
           id: true,
@@ -137,9 +138,15 @@ export async function sendDailyReminders(): Promise<void> {
 
     const answeredSet = answeredByQuestion.get(dq.questionId);
 
-    // 이 질문의 미답변자(skip 제외) — 1명 이상이어야 리마인드 발송
+    // 이 질문의 미답변자(skip 제외) — 1명 이상이어야 리마인드 발송.
+    // 멤버십 합류 시점 이전 DQ 는 답변 의무 없음 (MG-129) — 신규 가입자가 가족의
+    // 가장 최신 DQ 가 자신의 가입 이전 일자일 때 "오늘 답변 안 함" reminder 를
+    // 받던 결함 차단.
     const unfinished = memberships.filter(
-      (m) => !(answeredSet?.has(m.userId) ?? false) && !isSameDate(m.skippedDate, dq.date)
+      (m) =>
+        !(answeredSet?.has(m.userId) ?? false) &&
+        !isSameDate(m.skippedDate, dq.date) &&
+        m.joinedAt <= dq.date
     );
     if (unfinished.length === 0) continue;
 
@@ -149,6 +156,8 @@ export async function sendDailyReminders(): Promise<void> {
       if (!user) continue;
       // skip 멤버는 본인 의사로 오늘 건너뛰기 했으므로 리마인드 대상에서 제외
       if (isSameDate(m.skippedDate, dq.date)) continue;
+      // 합류 시점 이후의 DQ 에만 답변 의무 — 가입 이전 DQ 는 발송 대상 제외 (MG-129)
+      if (m.joinedAt > dq.date) continue;
 
       if (!userInfoMap.has(m.userId)) userInfoMap.set(m.userId, user);
 
