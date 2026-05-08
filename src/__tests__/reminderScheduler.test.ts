@@ -107,13 +107,16 @@ describe('sendDailyReminders (MG-19)', () => {
       'fam-1'
     );
     expect(mockSendApnsPush).toHaveBeenCalledTimes(1);
+    // MG-116: push payload type 은 'REMINDER_UNANSWERED' / 'REMINDER_ANSWERED' 분기 (DB type 은 'REMINDER').
+    // MG-111: 마지막 인자 notifId — mocked createNotification 이 undefined 반환.
     expect(mockSendApnsPush).toHaveBeenCalledWith(
       'apns-token',
       '오늘 질문에 답변하지 않았어요',
       '그룹에 접속해서 답변을 달아봐요',
-      'REMINDER',
+      'REMINDER_UNANSWERED',
       0,
-      'production'
+      'production',
+      undefined
     );
     expect(mockSendFcmPush).not.toHaveBeenCalled();
   });
@@ -185,10 +188,11 @@ describe('sendDailyReminders (MG-19)', () => {
     const user2Push = mockSendApnsPush.mock.calls.find((c) => c[0] === 'apns-2');
     expect(user1Push).toBeDefined();
     expect(user1Push![1]).toBe('미답변자가 있어요');
-    expect(user1Push![3]).toBe('REMINDER');
+    // MG-116: 답변자 → REMINDER_ANSWERED, 미답변자 → REMINDER_UNANSWERED (push payload type).
+    expect(user1Push![3]).toBe('REMINDER_ANSWERED');
     expect(user2Push).toBeDefined();
     expect(user2Push![1]).toBe('오늘 질문에 답변하지 않았어요');
-    expect(user2Push![3]).toBe('REMINDER');
+    expect(user2Push![3]).toBe('REMINDER_UNANSWERED');
   });
 
   it('동일 유저의 미답변 복수 건이어도 (유저, 가족) 단위 1건으로 통합된다', async () => {
@@ -264,11 +268,14 @@ describe('sendDailyReminders (MG-19)', () => {
 
     expect(mockSendApnsPush).not.toHaveBeenCalled();
     expect(mockSendFcmPush).toHaveBeenCalledTimes(1);
+    // sendFcmPush(token, title, body, type, data, notifId) — MG-116/MG-111 인자 추가 반영.
     expect(mockSendFcmPush).toHaveBeenCalledWith(
       'fcm-token',
       '오늘 질문에 답변하지 않았어요',
       '그룹에 접속해서 답변을 달아봐요',
-      'REMINDER'
+      'REMINDER_UNANSWERED',
+      undefined,
+      undefined
     );
   });
 
