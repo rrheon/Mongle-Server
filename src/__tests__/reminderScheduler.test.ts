@@ -32,6 +32,10 @@ jest.mock('../services/PushNotificationService', () => ({
 
 import { sendDailyReminders, getKstMidnightUtc } from '../reminderScheduler';
 
+// 모든 테스트의 default — 멤버십이 충분히 오래 전부터 존재했다고 가정.
+// 신규 합류자 케이스에서만 createdAt 을 dq.date 이후로 명시 설정해 검증 (MG-129).
+const PAST_JOINED_AT = new Date('2020-01-01');
+
 const mockUser = {
   id: 'user-1',
   apnsToken: 'apns-token',
@@ -92,7 +96,7 @@ describe('sendDailyReminders (MG-19)', () => {
       { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
     ]);
     mockMembershipFindMany.mockResolvedValue([
-      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, user: mockUser },
+      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, joinedAt: PAST_JOINED_AT, user: mockUser },
     ]);
     mockAnswerFindMany.mockResolvedValue([]);
 
@@ -126,7 +130,7 @@ describe('sendDailyReminders (MG-19)', () => {
       { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
     ]);
     mockMembershipFindMany.mockResolvedValue([
-      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, user: mockUser },
+      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, joinedAt: PAST_JOINED_AT, user: mockUser },
     ]);
     mockAnswerFindMany.mockResolvedValue([{ questionId: 'q-1', userId: 'user-1' }]);
 
@@ -142,7 +146,7 @@ describe('sendDailyReminders (MG-19)', () => {
       { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: dqDate },
     ]);
     mockMembershipFindMany.mockResolvedValue([
-      { userId: 'user-1', familyId: 'fam-1', skippedDate: dqDate, user: mockUser },
+      { userId: 'user-1', familyId: 'fam-1', skippedDate: dqDate, joinedAt: PAST_JOINED_AT, user: mockUser },
     ]);
     mockAnswerFindMany.mockResolvedValue([]);
 
@@ -157,8 +161,8 @@ describe('sendDailyReminders (MG-19)', () => {
       { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
     ]);
     mockMembershipFindMany.mockResolvedValue([
-      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, user: mockUser },
-      { userId: 'user-2', familyId: 'fam-1', skippedDate: null, user: otherUser },
+      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, joinedAt: PAST_JOINED_AT, user: mockUser },
+      { userId: 'user-2', familyId: 'fam-1', skippedDate: null, joinedAt: PAST_JOINED_AT, user: otherUser },
     ]);
     // user-1 답변, user-2 미답변
     mockAnswerFindMany.mockResolvedValue([{ questionId: 'q-1', userId: 'user-1' }]);
@@ -202,7 +206,7 @@ describe('sendDailyReminders (MG-19)', () => {
       { id: 'dq-3', questionId: 'q-3', familyId: 'fam-1', date: new Date('2026-04-15') },
     ]);
     mockMembershipFindMany.mockResolvedValue([
-      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, user: mockUser },
+      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, joinedAt: PAST_JOINED_AT, user: mockUser },
     ]);
     mockAnswerFindMany.mockResolvedValue([]);
 
@@ -219,8 +223,8 @@ describe('sendDailyReminders (MG-19)', () => {
       { id: 'dq-B', questionId: 'q-B', familyId: 'fam-B', date: new Date('2026-04-17') },
     ]);
     mockMembershipFindMany.mockResolvedValue([
-      { userId: 'user-1', familyId: 'fam-A', skippedDate: null, user: mockUser },
-      { userId: 'user-1', familyId: 'fam-B', skippedDate: null, user: mockUser },
+      { userId: 'user-1', familyId: 'fam-A', skippedDate: null, joinedAt: PAST_JOINED_AT, user: mockUser },
+      { userId: 'user-1', familyId: 'fam-B', skippedDate: null, joinedAt: PAST_JOINED_AT, user: mockUser },
     ]);
     mockAnswerFindMany.mockResolvedValue([]);
 
@@ -239,6 +243,7 @@ describe('sendDailyReminders (MG-19)', () => {
         userId: 'user-1',
         familyId: 'fam-1',
         skippedDate: null,
+        joinedAt: PAST_JOINED_AT,
         user: { ...mockUser, notifQuestion: false },
       },
     ]);
@@ -259,6 +264,7 @@ describe('sendDailyReminders (MG-19)', () => {
         userId: 'user-1',
         familyId: 'fam-1',
         skippedDate: null,
+        joinedAt: PAST_JOINED_AT,
         user: { ...mockUser, apnsToken: null, fcmToken: 'fcm-token' },
       },
     ]);
@@ -285,8 +291,8 @@ describe('sendDailyReminders (MG-19)', () => {
       { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: new Date('2026-04-17') },
     ]);
     mockMembershipFindMany.mockResolvedValue([
-      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, user: mockUser },
-      { userId: 'user-2', familyId: 'fam-1', skippedDate: null, user: otherUser },
+      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, joinedAt: PAST_JOINED_AT, user: mockUser },
+      { userId: 'user-2', familyId: 'fam-1', skippedDate: null, joinedAt: PAST_JOINED_AT, user: otherUser },
     ]);
     mockAnswerFindMany.mockResolvedValue([
       { questionId: 'q-1', userId: 'user-1' },
@@ -297,5 +303,56 @@ describe('sendDailyReminders (MG-19)', () => {
 
     expect(mockCreateNotification).not.toHaveBeenCalled();
     expect(mockSendApnsPush).not.toHaveBeenCalled();
+  });
+
+  // MG-129: 신규 합류자가 가족의 historical DQ (자신의 가입 이전 일자) 에 대해 reminder 를
+  // 받던 결함 차단. unfinished 판정과 발송 대상 등록 루프 양쪽에 멤버십 시점 필터 적용.
+  it('신규 합류자(membership.createdAt > dq.date) 는 historical DQ 에 대해 reminder 받지 않음 (MG-129)', async () => {
+    // 가족이 며칠 전부터 운영 중 → 최신 DQ 의 date 는 신규 합류자 가입 이전.
+    const dqDate = new Date('2026-04-15');
+    const newJoinerJoinedAt = new Date('2026-04-17'); // dq.date 이후 합류
+    mockDQFindMany.mockResolvedValue([
+      { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: dqDate },
+    ]);
+    mockMembershipFindMany.mockResolvedValue([
+      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, joinedAt: newJoinerJoinedAt, user: mockUser },
+    ]);
+    mockAnswerFindMany.mockResolvedValue([]);
+
+    await sendDailyReminders();
+
+    // 신규 합류자만 있고 그가 dq.date 이후 합류 → unfinished.length === 0 → 발송 skip
+    expect(mockCreateNotification).not.toHaveBeenCalled();
+    expect(mockSendApnsPush).not.toHaveBeenCalled();
+  });
+
+  it('기존 멤버 + 신규 합류자 혼재 시, 기존 멤버에게만 reminder 발송 (MG-129)', async () => {
+    const dqDate = new Date('2026-04-15');
+    const newJoinerJoinedAt = new Date('2026-04-17'); // dq.date 이후 합류
+    const newJoiner = { ...mockUser, id: 'user-2', apnsToken: 'apns-2' };
+    mockDQFindMany.mockResolvedValue([
+      { id: 'dq-1', questionId: 'q-1', familyId: 'fam-1', date: dqDate },
+    ]);
+    mockMembershipFindMany.mockResolvedValue([
+      // 기존 멤버 — 가입 시점 dq.date 이전, 미답변
+      { userId: 'user-1', familyId: 'fam-1', skippedDate: null, joinedAt: PAST_JOINED_AT, user: mockUser },
+      // 신규 합류자 — 가입 시점 dq.date 이후, 답변 의무 없음
+      { userId: 'user-2', familyId: 'fam-1', skippedDate: null, joinedAt: newJoinerJoinedAt, user: newJoiner },
+    ]);
+    mockAnswerFindMany.mockResolvedValue([]);
+
+    await sendDailyReminders();
+
+    // 기존 멤버에게만 발송, 신규 합류자에게는 안 감.
+    expect(mockCreateNotification).toHaveBeenCalledTimes(1);
+    expect(mockCreateNotification).toHaveBeenCalledWith(
+      'user-1',
+      'REMINDER',
+      expect.any(String),
+      expect.any(String),
+      'fam-1'
+    );
+    expect(mockSendApnsPush).toHaveBeenCalledTimes(1);
+    expect(mockSendApnsPush.mock.calls[0][0]).toBe('apns-token'); // user-1 의 토큰
   });
 });
