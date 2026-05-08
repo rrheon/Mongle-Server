@@ -2,6 +2,14 @@ import { NotificationType, PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
+/** unread/list 컷오프 — max(user.createdAt, now() - 14d). 가입 이전 알림과
+ *  14일 이전 누적을 카운트/표시에서 제외 (MG-127). */
+const UNREAD_TTL_DAYS = 14;
+function computeUnreadCutoff(userCreatedAt: Date): Date {
+  const ttlCutoff = new Date(Date.now() - UNREAD_TTL_DAYS * 24 * 60 * 60 * 1000);
+  return userCreatedAt > ttlCutoff ? userCreatedAt : ttlCutoff;
+}
+
 export interface NotificationDTO {
   id: string;
   userId: string;
@@ -20,8 +28,13 @@ export class NotificationService {
     // authUserId는 JWT의 OAuth userId (예: "kakao:xxx"), Notification.userId는 User.id(UUID) FK
     const user = await prisma.user.findUnique({ where: { userId: authUserId } });
     if (!user) return [];
+    const cutoff = computeUnreadCutoff(user.createdAt);
     const items = await prisma.notification.findMany({
-      where: { userId: user.id, ...(familyId ? { familyId } : {}) },
+      where: {
+        userId: user.id,
+        createdAt: { gt: cutoff },
+        ...(familyId ? { familyId } : {}),
+      },
       orderBy: { createdAt: 'desc' },
       take: limit,
     });
@@ -82,16 +95,31 @@ export class NotificationService {
     return created.id;
   }
 
-  /** 유저의 미읽음 알림 수 (뱃지 카운트용). userId 는 User.id (내부 UUID). 푸시 서비스용. */
+  /** 유저의 미읽음 알림 수 (뱃지 카운트용). userId 는 User.id (내부 UUID). 푸시 서비스용.
+   *  user.createdAt + 14일 TTL 컷오프 적용 (MG-127). */
   async getUnreadCount(userId: string): Promise<number> {
-    return prisma.notification.count({ where: { userId, isRead: false } });
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { createdAt: true },
+    });
+    if (!user) return 0;
+    const cutoff = computeUnreadCutoff(user.createdAt);
+    return prisma.notification.count({
+      where: { userId, isRead: false, createdAt: { gt: cutoff } },
+    });
   }
 
   /** 인증된 사용자의 미읽음 알림 수. iOS 가 OS 배지 동기화 시 호출 (50건 캡 우회용). */
   async getUnreadCountForAuthUser(authUserId: string): Promise<number> {
-    const user = await prisma.user.findUnique({ where: { userId: authUserId }, select: { id: true } });
+    const user = await prisma.user.findUnique({
+      where: { userId: authUserId },
+      select: { id: true, createdAt: true },
+    });
     if (!user) return 0;
-    return prisma.notification.count({ where: { userId: user.id, isRead: false } });
+    const cutoff = computeUnreadCutoff(user.createdAt);
+    return prisma.notification.count({
+      where: { userId: user.id, isRead: false, createdAt: { gt: cutoff } },
+    });
   }
 
   private toDTO(n: { id: string; userId: string; familyId: string | null; colorId?: string | null; type: NotificationType; title: string; body: string; isRead: boolean; createdAt: Date }): NotificationDTO {

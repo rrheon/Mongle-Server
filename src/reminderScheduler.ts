@@ -201,18 +201,18 @@ export async function sendDailyReminders(): Promise<void> {
   }
   await Promise.all(dbNotifTasks);
 
-  // 배치 조회 ④: badge 카운트 N+1 제거. 푸시 대상 전체의 unread 를 한 번의 groupBy 로
-  // 조회 후 Map 으로 사용. 이전엔 user 마다 getUnreadCount 호출로 N 회 쿼리 발생.
+  // badge 카운트 — NotificationService.getUnreadCount 로 통일 (MG-127).
+  // 이전 batch groupBy 는 user.createdAt / 14일 TTL 컷오프를 우회해 가입 이전 알림과
+  // 오래된 누적이 푸시 페이로드 badge 에 그대로 박혔음. user 별 가변 컷오프는
+  // groupBy 로 표현 불가 → 메서드 재사용 + Promise.all 병렬로 round trip 평탄화.
   const pushUserIds = Array.from(userInfoMap.keys());
-  const unreadCounts = await prisma.notification.groupBy({
-    by: ['userId'],
-    where: { userId: { in: pushUserIds }, isRead: false },
-    _count: { _all: true },
-  });
   const unreadByUser = new Map<string, number>();
-  for (const row of unreadCounts) {
-    unreadByUser.set(row.userId, row._count._all);
-  }
+  await Promise.all(
+    pushUserIds.map(async (uid) => {
+      const cnt = await notificationService.getUnreadCount(uid);
+      unreadByUser.set(uid, cnt);
+    })
+  );
 
   // 푸시 — 유저당 1회. 유저가 어느 가족에서든 미답변이면 미답변자 문구 사용(본인 답변이 더 긴급).
   const pushTasks: Promise<unknown>[] = [];
