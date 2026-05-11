@@ -714,7 +714,10 @@ async function notifyNewQuestion(familyId: string): Promise<void> {
     }
     if (m.fcmToken) {
       pushTasks.push(
-        pushSvc.sendFcmPush(m.fcmToken, title, body, 'NEW_QUESTION', undefined, notifId).catch((e) => {
+        (async () => {
+          const unreadCount = await notifSvc.getUnreadCount(m.id);
+          await pushSvc.sendFcmPush(m.fcmToken!, title, body, 'NEW_QUESTION', undefined, notifId, unreadCount);
+        })().catch((e) => {
           console.warn(`[notifyNewQuestion] FCM 실패 user=${m.id}:`, e);
         })
       );
