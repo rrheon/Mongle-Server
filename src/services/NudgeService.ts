@@ -131,14 +131,18 @@ export class NudgeService {
       }
       if (target.fcmToken) {
         pushTasks.push(
-          pushService.sendFcmPush(
-            target.fcmToken,
-            nudgeTitle,
-            nudgeBody,
-            'ANSWER_REQUEST',
-            undefined,
-            nudgeNotificationId
-          ).catch((e) => {
+          (async () => {
+            const unreadCount = await notificationService.getUnreadCount(target.id);
+            await pushService.sendFcmPush(
+              target.fcmToken!,
+              nudgeTitle,
+              nudgeBody,
+              'ANSWER_REQUEST',
+              undefined,
+              nudgeNotificationId,
+              unreadCount
+            );
+          })().catch((e) => {
             console.warn('[Nudge] FCM 푸시 실패:', e);
           })
         );

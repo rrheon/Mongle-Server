@@ -157,7 +157,10 @@ export class AnswerService {
         }
         if (member.fcmToken) {
           pushTasks.push(
-            pushService.sendFcmPush(member.fcmToken, title, body, 'MEMBER_ANSWERED', senderColorId, notifId).catch((e) => {
+            (async () => {
+              const unreadCount = await notificationService.getUnreadCount(member.id);
+              await pushService.sendFcmPush(member.fcmToken!, title, body, 'MEMBER_ANSWERED', senderColorId, notifId, unreadCount);
+            })().catch((e) => {
               console.warn('[Answer] FCM 푸시 실패:', e);
             })
           );

@@ -274,14 +274,15 @@ describe('sendDailyReminders (MG-19)', () => {
 
     expect(mockSendApnsPush).not.toHaveBeenCalled();
     expect(mockSendFcmPush).toHaveBeenCalledTimes(1);
-    // sendFcmPush(token, title, body, type, data, notifId) — MG-116/MG-111 인자 추가 반영.
+    // sendFcmPush(token, title, body, type, colorId, notifId, unreadCount) — MG-130 unreadCount 추가.
     expect(mockSendFcmPush).toHaveBeenCalledWith(
       'fcm-token',
       '오늘 질문에 답변하지 않았어요',
       '그룹에 접속해서 답변을 달아봐요',
       'REMINDER_UNANSWERED',
       undefined,
-      undefined
+      undefined,
+      0
     );
   });
 

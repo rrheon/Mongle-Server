@@ -51,8 +51,10 @@ export class PushNotificationService {
    * mongle_default 채널 대신 시스템 폴백 채널이 사용돼 헤드업 미노출/제조사 백그라운드
    * 제한 등으로 알림이 누락된다. data-only + high priority + ttl=0 으로 항상 클라가
    * 알림을 빌드하도록 보장. (MG-111)
-   * notificationId 를 data 에 포함해 클라가 알림 탭 시 자동 markAsRead 호출에 사용. */
-  async sendFcmPush(fcmToken: string, title: string, body: string, type: string, colorId?: string, notificationId?: string): Promise<void> {
+   * notificationId 를 data 에 포함해 클라가 알림 탭 시 자동 markAsRead 호출에 사용.
+   * unreadCount 를 notificationCount 로 함께 보내 클라가 setNumber() / 런처 배지에 그대로
+   * 반영하도록 한다 — 클라 자체 increment 로 누적되던 서버↔런처 불일치 해소 (MG-130). */
+  async sendFcmPush(fcmToken: string, title: string, body: string, type: string, colorId?: string, notificationId?: string, unreadCount?: number): Promise<void> {
     initFirebase();
     if (admin.apps.length === 0) {
       console.warn('[FCM] Firebase 미초기화 — 푸시 발송 건너뜀');
@@ -67,6 +69,7 @@ export class PushNotificationService {
           type,
           ...(colorId && { colorId }),
           ...(notificationId && { notificationId }),
+          ...(typeof unreadCount === 'number' && { notificationCount: String(unreadCount) }),
         },
         android: { priority: 'high', ttl: 0 },
       });

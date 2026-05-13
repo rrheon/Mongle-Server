@@ -256,7 +256,7 @@ export async function sendDailyReminders(): Promise<void> {
     if (user.fcmToken) {
       pushTasks.push(
         pushService
-          .sendFcmPush(user.fcmToken, title, body, pushType, undefined, notifId)
+          .sendFcmPush(user.fcmToken, title, body, pushType, undefined, notifId, badgeCount)
           .catch((e) => {
             console.warn('[Reminder] FCM 푸시 실패:', e);
           })
