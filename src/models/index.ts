@@ -148,6 +148,12 @@ export interface DailyQuestionHistoryResponse extends DailyQuestionResponse {
 // ============================================
 export interface CreateAnswerRequest {
   questionId: string;
+  /**
+   * (MG-133) 답변 대상 DailyQuestion ID. 신규 클라는 항상 전송 — 서버가 이 값을 검증해
+   * 이전 달 답변이 자동 매핑되는 회생 버그를 차단한다. 미전송 시 서버가 user.familyId 의
+   * today DailyQuestion 으로 fallback (구 클라 하위 호환).
+   */
+  dailyQuestionId?: string;
   content: string;
   imageUrl?: string;
   moodId?: string; // 답변 시 선택한 캐릭터 색상 (happy/calm/loved/sad/tired)
@@ -165,6 +171,8 @@ export interface AnswerResponse {
   imageUrl: string | null;
   user: UserResponse;
   questionId: string;
+  /** (MG-133) 어느 DailyQuestion 인스턴스에 대한 답변인지. orphan(옛 데이터)은 null. */
+  dailyQuestionId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

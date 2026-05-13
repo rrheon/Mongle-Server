@@ -40,30 +40,48 @@ export class AnswerService {
       throw Errors.notFound('질문');
     }
 
-    // 해당 질문이 사용자의 가족에 배정된 질문인지 검증
+    // (MG-133) 답변 대상 DailyQuestion 결정.
+    //  - 신규 클라: dailyQuestionId 명시 전송 → 그 DQ 가 user 의 가족 + questionId 일치인지 검증
+    //  - 구 클라(미전송): user.familyId 의 같은 questionId DQ 중 가장 최근 것 fallback
+    //                    (이전엔 questionId 만으로 unique 잡아서 다음 달 재배정 시 옛 답변
+    //                     자동 매핑되는 회생 버그가 있었음 — 그래서 가장 최근 DQ 만 매핑)
     let activeDailyQuestion: { id: string } | null = null;
     if (user.familyId) {
-      const dailyQuestion = await prisma.dailyQuestion.findFirst({
-        where: { questionId: normalizedQuestionId, familyId: user.familyId },
-      });
-      if (!dailyQuestion) {
-        throw Errors.badRequest('이 질문은 그룹에 배정되지 않았습니다.');
+      if (data.dailyQuestionId) {
+        const requested = await prisma.dailyQuestion.findUnique({
+          where: { id: data.dailyQuestionId.toLowerCase() },
+        });
+        if (!requested || requested.familyId !== user.familyId || requested.questionId !== normalizedQuestionId) {
+          throw Errors.badRequest('이 질문은 그룹에 배정되지 않았습니다.');
+        }
+        activeDailyQuestion = { id: requested.id };
+      } else {
+        const dailyQuestion = await prisma.dailyQuestion.findFirst({
+          where: { questionId: normalizedQuestionId, familyId: user.familyId },
+          orderBy: { date: 'desc' },
+        });
+        if (!dailyQuestion) {
+          throw Errors.badRequest('이 질문은 그룹에 배정되지 않았습니다.');
+        }
+        activeDailyQuestion = { id: dailyQuestion.id };
       }
-      activeDailyQuestion = dailyQuestion;
     }
 
-    // 이미 답변했는지 확인
-    const existingAnswer = await prisma.answer.findUnique({
-      where: {
-        userId_questionId: {
-          userId: user.id,
-          questionId: normalizedQuestionId,
+    // 같은 user 가 같은 DailyQuestion 에 두 번 답변 못함. activeDailyQuestion 이 null 이면
+    // (가족 미소속 케이스) unique 인덱스가 NULL 다중 허용 — 이 경로의 중복 차단은 application
+    // 레이어에서 별도 검증할 수도 있지만, 현 시점에서는 가족 미소속 답변 자체가 없는 흐름이라 생략.
+    if (activeDailyQuestion) {
+      const existingAnswer = await prisma.answer.findUnique({
+        where: {
+          userId_dailyQuestionId: {
+            userId: user.id,
+            dailyQuestionId: activeDailyQuestion.id,
+          },
         },
-      },
-    });
-
-    if (existingAnswer) {
-      throw Errors.conflict('이미 이 질문에 답변했습니다.');
+      });
+      if (existingAnswer) {
+        throw Errors.conflict('이미 이 질문에 답변했습니다.');
+      }
     }
 
     // 답변 생성
@@ -74,6 +92,7 @@ export class AnswerService {
         moodId: data.moodId,
         userId: user.id,
         questionId: normalizedQuestionId,
+        dailyQuestionId: activeDailyQuestion?.id ?? null,
       },
       include: { user: true },
     });
@@ -194,11 +213,23 @@ export class AnswerService {
       throw Errors.notFound('사용자');
     }
 
+    // (MG-133) questionId 만 받지만 같은 question 이 여러 DQ 에 재배정될 수 있으므로
+    // user.familyId 의 가장 최근 DQ 한 건만 본다. 옛 답변이 회생되어 보이는 일 차단.
+    let dq: { id: string } | null = null;
+    if (user.familyId) {
+      dq = await prisma.dailyQuestion.findFirst({
+        where: { questionId: questionId.toLowerCase(), familyId: user.familyId },
+        orderBy: { date: 'desc' },
+        select: { id: true },
+      });
+    }
+    if (!dq) return null;
+
     const answer = await prisma.answer.findUnique({
       where: {
-        userId_questionId: {
+        userId_dailyQuestionId: {
           userId: user.id,
-          questionId: questionId.toLowerCase(),
+          dailyQuestionId: dq.id,
         },
       },
       include: { user: true },
@@ -257,15 +288,20 @@ export class AnswerService {
       orderBy: { date: 'desc' },
     });
 
-    // 가족 구성원들의 답변 조회
-    const answers = await prisma.answer.findMany({
-      where: {
-        questionId: questionId.toLowerCase(),
-        userId: { in: memberUserIds },
-      },
-      include: { user: true },
-      orderBy: { createdAt: 'asc' },
-    });
+    // (MG-133) 가족 구성원들의 답변 조회 — 가장 최근 DQ 인스턴스 한 건의 답변만.
+    // 이전 questionId 만으로 조회 시, 같은 question 이 다음 달 재배정될 때 옛 답변이
+    // 그대로 화면에 노출되던 회생 버그가 있었음. dailyQuestion null (배정 이력 없음)
+    // 이면 빈 응답.
+    const answers = dailyQuestion
+      ? await prisma.answer.findMany({
+          where: {
+            dailyQuestionId: dailyQuestion.id,
+            userId: { in: memberUserIds },
+          },
+          include: { user: true },
+          orderBy: { createdAt: 'asc' },
+        })
+      : [];
 
     const myAnswer = answers.find((a) => a.userId === user.id);
     const answeredUserIds = new Set(answers.map((a) => a.userId));
@@ -422,6 +458,7 @@ export class AnswerService {
       imageUrl: string | null;
       moodId?: string | null;
       questionId: string;
+      dailyQuestionId?: string | null;
       createdAt: Date;
       updatedAt: Date;
       user: {
@@ -446,6 +483,7 @@ export class AnswerService {
       content: answer.content,
       imageUrl: answer.imageUrl,
       questionId: answer.questionId,
+      dailyQuestionId: answer.dailyQuestionId ?? null,
       createdAt: answer.createdAt,
       updatedAt: answer.updatedAt,
       user: {

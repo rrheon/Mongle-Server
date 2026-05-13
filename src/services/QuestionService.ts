@@ -95,10 +95,19 @@ export class QuestionService {
       select: { userId: true, skippedDate: true },
     });
 
+    // (MG-133) 이 (familyId, date) 의 DQ 인스턴스에 매핑된 답변만. questionId 만으로
+    // 보면 같은 question 이 재배정될 때 옛 답변으로 모든 멤버가 답변한 것처럼 잘못
+    // 판정되어 한 번도 답변하지 않은 DQ 가 자동 완료될 수 있었음.
+    const dq = await prisma.dailyQuestion.findUnique({
+      where: { familyId_date: { familyId, date } },
+      select: { id: true },
+    });
+    if (!dq) return false;
+
     const answeredUserIds = new Set(
       (await prisma.answer.findMany({
         where: {
-          questionId,
+          dailyQuestionId: dq.id,
           userId: { in: memberships.map((m) => m.userId) },
         },
         select: { userId: true },
@@ -166,9 +175,10 @@ export class QuestionService {
       throw Errors.badRequest('하트가 부족합니다. 질문을 패스하려면 하트 3개가 필요합니다.');
     }
 
-    // 이미 답변한 경우 패스 불가
+    // (MG-133) 이 DQ 인스턴스에 매핑된 답변만 — questionId 만 보면 옛 달 답변 때문에
+    // 잘못 차단됨.
     const myAnswer = await prisma.answer.findFirst({
-      where: { questionId: dailyQuestion.question.id, userId: user.id },
+      where: { dailyQuestionId: dailyQuestion.id, userId: user.id },
     });
     if (myAnswer) {
       throw Errors.conflict('이미 답변한 질문은 패스할 수 없습니다.');
@@ -268,13 +278,12 @@ export class QuestionService {
       prisma.dailyQuestion.findMany({
         where: { familyId: user.familyId, date: { lte: today } },
         include: {
-          question: {
-            include: {
-              answers: {
-                where: { userId: { in: memberIds } },
-                include: { user: { select: { id: true, name: true, familyId: true } } },
-              },
-            },
+          question: true,
+          // (MG-133) DQ 직접 역방향 — 이전엔 question.answers 로 가져와 같은 question 이
+          // 다음 달 재배정될 때 옛 답변까지 포함되던 회생 버그.
+          answers: {
+            where: { userId: { in: memberIds } },
+            include: { user: { select: { id: true, name: true, familyId: true } } },
           },
         },
         orderBy: [
@@ -290,11 +299,9 @@ export class QuestionService {
     ]);
 
     const data: DailyQuestionHistoryResponse[] = dailyQuestions.map((dq) => {
-      // 해당 질문에 대한 그룹 멤버들의 답변 전체를 포함.
-      // (이전에는 "DQ.date 기준 KST 하루 창" 으로 필터링했으나, 배정일 다음날 이후에
-      //  답변이 들어온 경우 history 에서 사라지는 데이터 손실 버그가 있었다.
-      //  완료 시점에 DQ.date 자체가 완료일자로 이동하므로 윈도우 필터 불필요.)
-      const answers = dq.question.answers;
+      // (MG-133) DQ 자체에 매핑된 답변만 — 이전엔 dq.question.answers 로 같은 질문의
+      // 모든 답변을 가져와 다른 달 답변이 회생되어 보이던 버그가 있었음.
+      const answers = dq.answers;
       const answerSummaries: HistoryAnswerSummary[] = answers.map((a) => ({
         id: a.id,
         userId: a.userId,
@@ -573,10 +580,11 @@ export class QuestionService {
     ]);
     const memberIds = memberships.map((m) => m.userId);
 
-    // 가족 멤버의 답변 조회 (questionId + userId unique constraint로 중복 없음)
+    // (MG-133) 이 DQ 인스턴스에 매핑된 답변만. 이전엔 questionId 만으로 조회해서
+    // 같은 question 이 다음 달 재배정될 때 옛 답변까지 hit → hasMyAnswer=true 회생.
     const answers = await prisma.answer.findMany({
       where: {
-        questionId: dailyQuestion.question.id,
+        dailyQuestionId: dailyQuestion.id,
         userId: { in: memberIds },
       },
       select: { userId: true },

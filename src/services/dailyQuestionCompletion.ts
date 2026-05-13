@@ -34,9 +34,11 @@ export async function tryFinalizeDailyQuestion(params: {
   });
   if (memberships.length === 0) return;
 
+  // (MG-133) 이 DQ 인스턴스에 매핑된 답변만. questionId 만 보면 같은 question 이
+  // 다음 달 재배정될 때 옛 답변으로 잘못 완료 처리될 수 있음.
   const answers = await prisma.answer.findMany({
     where: {
-      questionId: dq.questionId,
+      dailyQuestionId: dq.id,
       userId: { in: memberships.map((m) => m.userId) },
     },
     select: { userId: true },
