@@ -139,6 +139,7 @@ model DailyQuestion {
   completedAt DateTime? @map("completed_at")
   family      Family    @relation(fields: [familyId], references: [id])
   question    Question  @relation(fields: [questionId], references: [id])
+  answers     Answer[]
 
   @@unique([familyId, date])
   @@index([familyId, completedAt])
@@ -155,18 +156,27 @@ model UserAccessLog {
 }
 
 model Answer {
-  id         String   @id @default(uuid())
-  content    String
-  imageUrl   String?  @map("image_url")
-  userId     String   @map("user_id")
-  questionId String   @map("question_id")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
-  moodId     String?  @map("mood_id")
-  question   Question @relation(fields: [questionId], references: [id])
-  user       User     @relation(fields: [userId], references: [id])
+  id              String         @id @default(uuid())
+  content         String
+  imageUrl        String?        @map("image_url")
+  userId          String         @map("user_id")
+  questionId      String         @map("question_id")
+  // (MG-133) 어느 DailyQuestion 인스턴스에 대한 답변인지. nullable 인 이유:
+  //   1) 가족이 해체되어 DailyQuestion 이 사라진 옛 답변 (orphan, 운영상 38건 발견)
+  //   2) Postgres 의 nullable + UNIQUE 동작상 NULL 다중 허용 → orphan 끼리 충돌 없음
+  // 새 답변은 application 레이어에서 항상 채운다.
+  dailyQuestionId String?        @map("daily_question_id")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  moodId          String?        @map("mood_id")
+  question        Question       @relation(fields: [questionId], references: [id])
+  user            User           @relation(fields: [userId], references: [id])
+  dailyQuestion   DailyQuestion? @relation(fields: [dailyQuestionId], references: [id])
 
-  @@unique([userId, questionId])
+  // 같은 user 가 같은 DailyQuestion 에 두 번 답변 못함 (이전 (userId, questionId) 대체).
+  // questionId 만으로 unique 잡으면 같은 question 이 다음 달에 재배정될 때 옛 답변이
+  // 자동 매핑되는 회생 버그가 발생함 (MG-133 root cause).
+  @@unique([userId, dailyQuestionId])
   @@map("answers")
 }
 
