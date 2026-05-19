@@ -40,6 +40,13 @@ export class AnswerService {
       throw Errors.notFound('질문');
     }
 
+    // (MG-131) 활성 그룹 없으면 답변을 받지 않는다. user.familyId 가 null 인데 답변을
+    // 저장하면 dailyQuestionId 가 NULL 인 orphan 으로 들어가, 이후 홈/기록 API 의
+    // (dailyQuestionId, userId) 쿼리에 매치되지 않아 UI 에서 영영 누락된다 (5/17 발생 사례).
+    if (!user.familyId) {
+      throw Errors.badRequest('활성 그룹이 없습니다. 그룹 가입 후 답변해주세요.');
+    }
+
     // (MG-133) 답변 대상 DailyQuestion 결정.
     //  - 신규 클라: dailyQuestionId 명시 전송 → 그 DQ 가 user 의 가족 + questionId 일치인지 검증
     //  - 구 클라(미전송): user.familyId 의 같은 questionId DQ 중 가장 최근 것 fallback
