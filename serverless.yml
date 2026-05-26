@@ -42,6 +42,11 @@ provider:
     SMTP_USER: ${env:SMTP_USER, ''}
     SMTP_PASS: ${env:SMTP_PASS, ''}
     SMTP_FROM: ${env:SMTP_FROM, ''}
+    # 광고 노출 토글 (MG-137). ConfigController(/config)가 이 값을 그대로 isAdEnabled 로
+    # 반환한다. 이 줄이 없으면 Lambda 런타임에 ADS_ENABLED 가 주입되지 않아 항상 undefined →
+    # 컨트롤러가 기본 true 로 응답해 운영자가 무엇을 설정해도 광고가 꺼지지 않는다.
+    # 미설정 시 'true'(기존 동작). OFF 하려면 .env 에 ADS_ENABLED=false.
+    ADS_ENABLED: ${env:ADS_ENABLED, 'true'}
 
   # IAM 권한 (최소 권한 원칙)
   iam:
