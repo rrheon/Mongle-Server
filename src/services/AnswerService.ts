@@ -40,55 +40,64 @@ export class AnswerService {
       throw Errors.notFound('질문');
     }
 
-    // (MG-131) 활성 그룹 없으면 답변을 받지 않는다. user.familyId 가 null 인데 답변을
-    // 저장하면 dailyQuestionId 가 NULL 인 orphan 으로 들어가, 이후 홈/기록 API 의
-    // (dailyQuestionId, userId) 쿼리에 매치되지 않아 UI 에서 영영 누락된다 (5/17 발생 사례).
-    if (!user.familyId) {
+    // (MG-138) 답변 대상 그룹은 user.familyId(단일 "활성" 그룹)가 아니라 사용자의 모든
+    // FamilyMembership 기준으로 정한다. user.familyId 는 현재 활성 가족 1개만 가리키므로,
+    // 멀티그룹 멤버가 비활성 그룹의 질문에 답하면 옛 코드는 해당 DQ 를 그 그룹에서 못 찾아
+    // 답변을 거부했다(400) — 5/18 써니 사례. 읽기 경로 getFamilyAnswers 가 이미 멤버십
+    // 기반인 것과 일치시킨다.
+    const memberships = await prisma.familyMembership.findMany({
+      where: { userId: user.id },
+      select: { familyId: true },
+    });
+    const familyIds = memberships.map((m) => m.familyId);
+
+    // 그룹 미소속이면 답변을 받지 않는다 (MG-131). 소속 없이 저장하면 dailyQuestionId 가
+    // NULL orphan 으로 들어가 이후 홈/기록 API 의 (dailyQuestionId, userId) 쿼리에 영영
+    // 매치되지 않아 UI 에서 누락된다.
+    if (familyIds.length === 0) {
       throw Errors.badRequest('활성 그룹이 없습니다. 그룹 가입 후 답변해주세요.');
     }
 
-    // (MG-133) 답변 대상 DailyQuestion 결정.
-    //  - 신규 클라: dailyQuestionId 명시 전송 → 그 DQ 가 user 의 가족 + questionId 일치인지 검증
-    //  - 구 클라(미전송): user.familyId 의 같은 questionId DQ 중 가장 최근 것 fallback
-    //                    (이전엔 questionId 만으로 unique 잡아서 다음 달 재배정 시 옛 답변
-    //                     자동 매핑되는 회생 버그가 있었음 — 그래서 가장 최근 DQ 만 매핑)
-    let activeDailyQuestion: { id: string } | null = null;
-    if (user.familyId) {
-      if (data.dailyQuestionId) {
-        const requested = await prisma.dailyQuestion.findUnique({
-          where: { id: data.dailyQuestionId.toLowerCase() },
-        });
-        if (!requested || requested.familyId !== user.familyId || requested.questionId !== normalizedQuestionId) {
-          throw Errors.badRequest('이 질문은 그룹에 배정되지 않았습니다.');
-        }
-        activeDailyQuestion = { id: requested.id };
-      } else {
-        const dailyQuestion = await prisma.dailyQuestion.findFirst({
-          where: { questionId: normalizedQuestionId, familyId: user.familyId },
-          orderBy: { date: 'desc' },
-        });
-        if (!dailyQuestion) {
-          throw Errors.badRequest('이 질문은 그룹에 배정되지 않았습니다.');
-        }
-        activeDailyQuestion = { id: dailyQuestion.id };
+    // (MG-133/138) 답변 대상 DailyQuestion 결정.
+    //  - 신규 클라: dailyQuestionId 명시 전송 → 그 DQ 가 user 의 가족(들) + questionId 일치인지 검증
+    //  - 구 클라(미전송): 사용자의 가족들 중 같은 questionId DQ 가장 최근 것 fallback.
+    //    (같은 question 이 여러 그룹에 배정된 멀티그룹 케이스는 클라가 dailyQuestionId 를
+    //     보내야 정확히 특정된다 — 클라 후속 작업. 그 전까지는 best-effort 로 최근 DQ.)
+    let activeDailyQuestion: { id: string; familyId: string };
+    if (data.dailyQuestionId) {
+      const requested = await prisma.dailyQuestion.findUnique({
+        where: { id: data.dailyQuestionId.toLowerCase() },
+      });
+      if (!requested || !familyIds.includes(requested.familyId) || requested.questionId !== normalizedQuestionId) {
+        throw Errors.badRequest('이 질문은 그룹에 배정되지 않았습니다.');
       }
+      activeDailyQuestion = { id: requested.id, familyId: requested.familyId };
+    } else {
+      const dailyQuestion = await prisma.dailyQuestion.findFirst({
+        where: { questionId: normalizedQuestionId, familyId: { in: familyIds } },
+        orderBy: { date: 'desc' },
+      });
+      if (!dailyQuestion) {
+        throw Errors.badRequest('이 질문은 그룹에 배정되지 않았습니다.');
+      }
+      activeDailyQuestion = { id: dailyQuestion.id, familyId: dailyQuestion.familyId };
     }
 
-    // 같은 user 가 같은 DailyQuestion 에 두 번 답변 못함. activeDailyQuestion 이 null 이면
-    // (가족 미소속 케이스) unique 인덱스가 NULL 다중 허용 — 이 경로의 중복 차단은 application
-    // 레이어에서 별도 검증할 수도 있지만, 현 시점에서는 가족 미소속 답변 자체가 없는 흐름이라 생략.
-    if (activeDailyQuestion) {
-      const existingAnswer = await prisma.answer.findUnique({
-        where: {
-          userId_dailyQuestionId: {
-            userId: user.id,
-            dailyQuestionId: activeDailyQuestion.id,
-          },
+    // 답변이 실제로 속한 그룹. 하트/알림/완료처리 등 부수효과는 user.familyId 가 아니라
+    // 이 값을 기준으로 한다 (비활성 그룹 질문 답변도 올바른 그룹에 반영되도록).
+    const answerFamilyId = activeDailyQuestion.familyId;
+
+    // 같은 user 가 같은 DailyQuestion 에 두 번 답변 못함.
+    const existingAnswer = await prisma.answer.findUnique({
+      where: {
+        userId_dailyQuestionId: {
+          userId: user.id,
+          dailyQuestionId: activeDailyQuestion.id,
         },
-      });
-      if (existingAnswer) {
-        throw Errors.conflict('이미 이 질문에 답변했습니다.');
-      }
+      },
+    });
+    if (existingAnswer) {
+      throw Errors.conflict('이미 이 질문에 답변했습니다.');
     }
 
     // 답변 생성
@@ -99,15 +108,15 @@ export class AnswerService {
         moodId: data.moodId,
         userId: user.id,
         questionId: normalizedQuestionId,
-        dailyQuestionId: activeDailyQuestion?.id ?? null,
+        dailyQuestionId: activeDailyQuestion.id,
       },
       include: { user: true },
     });
 
-    // 하트 +1, 답변 시 선택한 캐릭터 색상(moodId) 저장 (FamilyMembership 기준)
-    if (user.familyId) {
+    // 하트 +1, 답변 시 선택한 캐릭터 색상(moodId) 저장 (답변이 속한 그룹의 FamilyMembership 기준)
+    if (answerFamilyId) {
       await prisma.familyMembership.updateMany({
-        where: { userId: user.id, familyId: user.familyId },
+        where: { userId: user.id, familyId: answerFamilyId },
         data: {
           hearts: { increment: 1 },
           ...(data.moodId && { colorId: data.moodId }),
@@ -116,7 +125,7 @@ export class AnswerService {
 
       // 가족 멤버(본인 제외)에게 답변 알림 발송
       const senderMembership = await prisma.familyMembership.findUnique({
-        where: { userId_familyId: { userId: user.id, familyId: user.familyId } },
+        where: { userId_familyId: { userId: user.id, familyId: answerFamilyId } },
         select: { nickname: true, colorId: true },
       });
       const senderNickname = senderMembership?.nickname ?? user.name;
@@ -126,7 +135,7 @@ export class AnswerService {
       // 멤버가 다른 그룹을 활성으로 두면 매칭 0건이 되어 MEMBER_ANSWERED 알림이 누락되던
       // 버그(MG-29) 수정. 본인 제외는 userId 비교로 처리.
       const otherMemberships = await prisma.familyMembership.findMany({
-        where: { familyId: user.familyId, userId: { not: user.id } },
+        where: { familyId: answerFamilyId, userId: { not: user.id } },
         select: {
           user: {
             select: {
@@ -151,7 +160,7 @@ export class AnswerService {
         const title = msgs.memberAnswered.title(senderNickname);
         const body = msgs.memberAnswered.body;
         dbNotifTasks.push(
-          notificationService.createNotification(member.id, 'MEMBER_ANSWERED', title, body, user.familyId, senderColorId)
+          notificationService.createNotification(member.id, 'MEMBER_ANSWERED', title, body, answerFamilyId, senderColorId)
             .then((notifId) => { notificationIdByMember.set(member.id, notifId); })
             .catch((e) => {
               console.warn('[Answer] 알림 저장 실패:', e);
@@ -196,15 +205,13 @@ export class AnswerService {
 
       // 그룹 전원이 이번 답변으로 완료되었다면 DailyQuestion.completedAt 을 기록
       // → history 상 "완료일자" 기준으로 노출 (20일 배정 + 21일 완료 → 21일에 기록)
-      if (activeDailyQuestion) {
-        try {
-          await tryFinalizeDailyQuestion({
-            familyId: user.familyId,
-            dailyQuestionId: activeDailyQuestion.id,
-          });
-        } catch (e) {
-          console.warn('[Answer] DQ finalize 실패:', e);
-        }
+      try {
+        await tryFinalizeDailyQuestion({
+          familyId: answerFamilyId,
+          dailyQuestionId: activeDailyQuestion.id,
+        });
+      } catch (e) {
+        console.warn('[Answer] DQ finalize 실패:', e);
       }
     }
 
