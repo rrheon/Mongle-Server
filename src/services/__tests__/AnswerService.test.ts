@@ -118,10 +118,14 @@ const mockAnswerWithUser = {
 
 // createAnswer 가 성공 경로로 흘러갈 때 필요한 후속 호출들을 미리 세팅
 function setupCreateAnswerSuccessPath() {
-  mockPrismaDailyQuestionFindFirst.mockResolvedValue({ id: 'daily-q-id' });
+  // (MG-138) familyMembership.findMany 는 두 번 호출된다:
+  //   1) getFamilyIds — 사용자의 소속 그룹 목록 (답변 대상 DQ 해석 기준)
+  //   2) otherMemberships — 답변 그룹의 타 멤버 (빈 배열 = 알림/푸시 루프 생략)
+  mockPrismaFamilyMembershipFindMany
+    .mockResolvedValueOnce([{ familyId: 'family-id' }])
+    .mockResolvedValueOnce([]);
+  mockPrismaDailyQuestionFindFirst.mockResolvedValue({ id: 'daily-q-id', familyId: 'family-id' });
   mockPrismaFamilyMembershipFindUnique.mockResolvedValue({ nickname: null, colorId: 'loved' });
-  // MG-29: prisma.user.findMany → familyMembership.findMany 로 변경됨. 빈 멤버십 = 알림/푸시 루프 생략.
-  mockPrismaFamilyMembershipFindMany.mockResolvedValueOnce([]);
 }
 
 describe('AnswerService.createAnswer', () => {
@@ -143,7 +147,8 @@ describe('AnswerService.createAnswer', () => {
   it('이미 답변한 질문에 다시 답변하면 에러를 던진다', async () => {
     mockPrismaUserFindUnique.mockResolvedValue(mockUser);
     mockPrismaQuestionFindUnique.mockResolvedValue(mockQuestion);
-    mockPrismaDailyQuestionFindFirst.mockResolvedValue({ id: 'daily-q-id' });
+    mockPrismaFamilyMembershipFindMany.mockResolvedValueOnce([{ familyId: 'family-id' }]); // getFamilyIds
+    mockPrismaDailyQuestionFindFirst.mockResolvedValue({ id: 'daily-q-id', familyId: 'family-id' });
     mockPrismaAnswerFindUnique.mockResolvedValue(mockAnswerWithUser); // 이미 답변 존재
 
     await expect(
@@ -168,16 +173,47 @@ describe('AnswerService.createAnswer', () => {
     );
   });
 
-  it('가족이 없는 유저는 하트 업데이트를 하지 않는다', async () => {
-    const userNoFamily = { ...mockUser, familyId: null };
-    mockPrismaUserFindUnique.mockResolvedValue(userNoFamily);
+  it('소속 그룹이 없는 유저는 답변이 거부된다 (MG-138 — 멤버십 기준)', async () => {
+    // user.familyId 가 null 이든 아니든, 판단 기준은 FamilyMembership 집합이다.
+    mockPrismaUserFindUnique.mockResolvedValue(mockUser);
+    mockPrismaQuestionFindUnique.mockResolvedValue(mockQuestion);
+    mockPrismaFamilyMembershipFindMany.mockResolvedValueOnce([]); // 멤버십 0건
+
+    await expect(
+      service.createAnswer('kakao:123', { questionId: 'question-id', content: '답변' })
+    ).rejects.toThrow('활성 그룹이 없습니다');
+    expect(mockPrismaFamilyMembershipUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('비활성 그룹(user.familyId 와 다른 멤버십)의 질문에도 답변이 저장된다 (MG-138)', async () => {
+    // user.familyId 는 'family-id' 지만, 실제 답변 대상 DQ 는 다른 소속 그룹 'other-fam' 의 것.
+    mockPrismaUserFindUnique.mockResolvedValue(mockUser);
     mockPrismaQuestionFindUnique.mockResolvedValue(mockQuestion);
     mockPrismaAnswerFindUnique.mockResolvedValue(null);
     mockPrismaAnswerCreate.mockResolvedValue(mockAnswerWithUser);
+    mockPrismaFamilyMembershipUpdateMany.mockResolvedValue({ count: 1 });
+    mockPrismaFamilyMembershipFindMany
+      .mockResolvedValueOnce([{ familyId: 'family-id' }, { familyId: 'other-fam' }]) // getFamilyIds
+      .mockResolvedValueOnce([]); // otherMemberships
+    // fallback 이 사용자의 그룹들 중 최근 DQ 로 'other-fam' 을 고른 상황
+    mockPrismaDailyQuestionFindFirst.mockResolvedValue({ id: 'daily-q-other', familyId: 'other-fam' });
+    mockPrismaFamilyMembershipFindUnique.mockResolvedValue({ nickname: null, colorId: 'loved' });
 
     await service.createAnswer('kakao:123', { questionId: 'question-id', content: '답변' });
 
-    expect(mockPrismaFamilyMembershipUpdateMany).not.toHaveBeenCalled();
+    // 답변 생성 시 그 DQ 에 연결
+    expect(mockPrismaAnswerCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ dailyQuestionId: 'daily-q-other' }),
+      })
+    );
+    // 하트는 답변이 속한 그룹(other-fam) 에 +1
+    expect(mockPrismaFamilyMembershipUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ familyId: 'other-fam' }),
+        data: expect.objectContaining({ hearts: { increment: 1 } }),
+      })
+    );
   });
 
   it('questionId는 소문자로 정규화된다', async () => {
