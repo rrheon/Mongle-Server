@@ -43,6 +43,7 @@ const mockUser = {
   fcmToken: null,
   locale: 'ko',
   notifQuestion: true,
+  sessionState: 'active', // (MG-141) 활성 세션이라야 콘텐츠 푸시 발송
 };
 
 describe('getKstMidnightUtc', () => {
