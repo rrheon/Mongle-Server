@@ -216,6 +216,37 @@ describe('AnswerService.createAnswer', () => {
     );
   });
 
+  it('dailyQuestionId 미전송 멀티그룹: 활성 그룹(user.familyId) DQ 를 우선 선택한다 (409 fix)', async () => {
+    // 같은 question 이 활성 그룹(family-id)과 다른 그룹(other-fam) 둘 다에 배정된 상황.
+    // 구 클라가 dailyQuestionId 없이 보내면, 활성 그룹 DQ 를 먼저 골라야 한다.
+    mockPrismaUserFindUnique.mockResolvedValue(mockUser); // familyId: 'family-id'
+    mockPrismaQuestionFindUnique.mockResolvedValue(mockQuestion);
+    mockPrismaAnswerFindUnique.mockResolvedValue(null);
+    mockPrismaAnswerCreate.mockResolvedValue(mockAnswerWithUser);
+    mockPrismaFamilyMembershipUpdateMany.mockResolvedValue({ count: 1 });
+    mockPrismaFamilyMembershipFindMany
+      .mockResolvedValueOnce([{ familyId: 'family-id' }, { familyId: 'other-fam' }]) // getFamilyIds
+      .mockResolvedValueOnce([]); // otherMemberships
+    // 첫 호출(활성 그룹 우선) → family-id DQ, 둘째 호출(멤버십 폴백)은 사용되면 안 됨
+    mockPrismaDailyQuestionFindFirst
+      .mockResolvedValueOnce({ id: 'daily-q-active', familyId: 'family-id' })
+      .mockResolvedValueOnce({ id: 'daily-q-other', familyId: 'other-fam' });
+    mockPrismaFamilyMembershipFindUnique.mockResolvedValue({ nickname: null, colorId: 'loved' });
+
+    await service.createAnswer('kakao:123', { questionId: 'question-id', content: '답변' });
+
+    // 활성 그룹 DQ 로 우선 조회됨
+    expect(mockPrismaDailyQuestionFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { questionId: 'question-id', familyId: 'family-id' } })
+    );
+    // 폴백을 타지 않고 활성 그룹 DQ 에 연결됨
+    expect(mockPrismaAnswerCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ dailyQuestionId: 'daily-q-active' }),
+      })
+    );
+  });
+
   it('questionId는 소문자로 정규화된다', async () => {
     mockPrismaUserFindUnique.mockResolvedValue(mockUser);
     mockPrismaQuestionFindUnique.mockResolvedValue(mockQuestion);
