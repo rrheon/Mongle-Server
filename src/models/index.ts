@@ -70,6 +70,8 @@ export interface FamilyResponse {
   members: UserResponse[];
   createdAt: Date;
   streakDays: number;
+  // 가족 공유 홈 배경 id (상점). 미설정이면 생략(기본 배경). 홈 배경 영속화에 사용.
+  appliedBackgroundId?: string;
 }
 
 export interface FamilyMembersResponse {
@@ -189,6 +191,45 @@ export interface FamilyAnswersResponse {
   totalCount: number;
   myAnswer: AnswerResponse | null;
   memberStatuses: MemberAnswerStatus[];
+}
+
+// ============================================
+// Shop
+// ============================================
+export type ShopItemKind = 'background' | 'decoration';
+
+export type DecorationSlot = 'head' | 'back' | 'feet';
+
+export interface ShopCatalogItemDto {
+  id: string;
+  kind: ShopItemKind;
+  name: string;
+  price: number;
+  assetName?: string;
+  slot?: DecorationSlot;
+  isSeasonal?: boolean;
+  sortOrder?: number;
+}
+
+export interface EquippedDecorationsDto {
+  head?: string;
+  back?: string;
+  feet?: string;
+}
+
+export interface ShopInventoryResponse {
+  ownedDecorationIds: string[];
+  equippedDecorations: EquippedDecorationsDto;
+  ownedBackgroundIds: string[];
+  appliedBackgroundId?: string;
+}
+
+export interface EquipResponse {
+  equippedDecorations: EquippedDecorationsDto;
+}
+
+export interface PurchaseResponse {
+  heartsRemaining: number;
 }
 
 // ============================================

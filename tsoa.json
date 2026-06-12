@@ -28,7 +28,8 @@
       { "name": "Families", "description": "가족 관련 API" },
       { "name": "Questions", "description": "질문 관련 API" },
       { "name": "Answers", "description": "답변 관련 API" },
-      { "name": "Tree", "description": "나무 성장 관련 API" }
+      { "name": "Tree", "description": "나무 성장 관련 API" },
+      { "name": "Shop", "description": "상점(배경/꾸미기) 관련 API" }
     ]
   },
   "routes": {
