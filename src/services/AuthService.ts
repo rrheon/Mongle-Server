@@ -29,6 +29,12 @@ export async function issueTokensForUser(
   await prisma.userRefreshToken.create({
     data: { userId: internalUserId, tokenHash, expiresAt },
   });
+  // (MG-141) 로그인 = 세션 활성화. 이전 로그아웃/만료(soft logout)로 비활성이던 상태를 active 로
+  // 복귀시켜 콘텐츠 푸시를 재개하고 재참여 푸시는 멈춘다. 모든 로그인 경로(social/email)의 단일 지점.
+  await prisma.user.update({
+    where: { id: internalUserId },
+    data: { sessionState: 'active' },
+  });
   return { token, refresh_token };
 }
 
@@ -343,9 +349,13 @@ export class AuthService {
   }
 
   /**
-   * 로그아웃 — 디바이스 푸시 토큰(APNs/FCM) 제거 + active refresh 토큰 전체 revoke
-   * 동일 디바이스로 다른 계정 로그인 시 이전 계정에 푸시가 가는 문제 방지.
-   * refresh 토큰을 함께 무효화해야 logout 이후 동일 토큰으로 access 재발급 불가.
+   * 로그아웃 — (MG-141) 디바이스 푸시 토큰(APNs/FCM)은 "보존"하고 sessionState='logged_out' 으로 전환.
+   * active refresh 토큰은 전체 revoke 해 동일 토큰으로 access 재발급은 막는다.
+   *
+   * 토큰을 NULL 로 지우던 이전 동작은 의도치 않은 로그아웃 시 가족 재촉 푸시까지 끊어 연결을 단절시켰다.
+   * 이제 토큰을 남겨 "다시 로그인" 재참여 푸시를 보낼 수 있게 하고, 콘텐츠 푸시는 sessionState 게이트로 차단한다.
+   * 동일 기기를 다른 계정이 인계받으면 registerDeviceToken 의 토큰 회수 불변식이 이 토큰을 NULL 로 만들어
+   * 프라이버시(이전 계정 대상 푸시가 새 계정 기기로 가는 것)를 보호한다.
    */
   async logout(userId: string): Promise<void> {
     const user = await prisma.user.findUnique({ where: { userId }, select: { id: true } });
@@ -356,13 +366,25 @@ export class AuthService {
     await prisma.$transaction([
       prisma.user.update({
         where: { id: user.id },
-        data: { apnsToken: null, fcmToken: null },
+        data: { sessionState: 'logged_out' },
       }),
       prisma.userRefreshToken.updateMany({
         where: { userId: user.id, revokedAt: null },
         data: { revokedAt: new Date() },
       }),
     ]);
+  }
+
+  /**
+   * (MG-141) 의도치 않은 세션 만료 표시 — refresh 실패(만료/재사용/미등록) 시 호출.
+   * 이미 logged_out 인 유저는 그대로 두고, active 인 유저만 expired 로 내려 재참여 푸시 대상이 되게 한다.
+   * 디바이스 토큰은 건드리지 않는다(보존).
+   */
+  private async markSessionExpired(internalUserId: string): Promise<void> {
+    await prisma.user.updateMany({
+      where: { id: internalUserId, sessionState: 'active' },
+      data: { sessionState: 'expired' },
+    });
   }
 
   async refreshToken(refreshToken: string): Promise<TokenRefreshResult> {
@@ -383,6 +405,7 @@ export class AuthService {
     // 마이그레이션 직후 호환을 위해 grace period 가 필요하면 여기서 신규 발급 흐름으로
     // 폴백할 수 있으나, 보안 우선으로 거부 + 클라이언트 재로그인 유도 (MG-33 흐름).
     if (!record) {
+      await this.markSessionExpired(user.id); // (MG-141) 의도치 않은 만료 → 재참여 푸시 대상
       throw Errors.unauthorized('유효하지 않은 리프레시 토큰입니다.');
     }
 
@@ -393,10 +416,12 @@ export class AuthService {
         where: { userId: user.id, revokedAt: null },
         data: { revokedAt: new Date() },
       });
+      await this.markSessionExpired(user.id); // (MG-141)
       throw Errors.unauthorized('재사용이 감지된 리프레시 토큰입니다. 다시 로그인해주세요.');
     }
 
     if (record.expiresAt.getTime() < Date.now()) {
+      await this.markSessionExpired(user.id); // (MG-141)
       throw Errors.unauthorized('만료된 리프레시 토큰입니다.');
     }
 

@@ -305,7 +305,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       const userId = req.params.userId;
       const user = await prisma.user.findUnique({
         where: { id: userId },
-        select: { id: true, apnsToken: true, fcmToken: true, locale: true, notifQuestion: true, familyId: true },
+        select: { id: true, apnsToken: true, fcmToken: true, locale: true, notifQuestion: true, familyId: true, sessionState: true },
       });
       if (!user) { res.status(404).json({ error: 'user not found' }); return; }
 
@@ -342,6 +342,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
           locale: user.locale,
           notifQuestion: user.notifQuestion,
           familyId: user.familyId,
+          sessionState: user.sessionState, // (MG-141) active/expired/logged_out — 콘텐츠 vs 재참여 푸시 게이트
         },
         memberships: memberships.map((m) => ({
           familyId: m.familyId,

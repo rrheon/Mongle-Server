@@ -4,6 +4,7 @@ import { NotificationService } from './NotificationService';
 import { PushNotificationService } from './PushNotificationService';
 import { getPushMessages } from '../utils/i18n/push';
 import { isInQuietHours } from '../utils/quietHours';
+import { canSendContentPush, shouldSendReengagePush } from '../utils/pushPolicy';
 
 const notificationService = new NotificationService();
 const pushService = new PushNotificationService();
@@ -116,16 +117,53 @@ export class NudgeService {
     );
 
     // 푸시 발송 — Lambda 환경에서는 반드시 await 해야 함.
-    // 알림 선호도 체크: notifNudge 꺼졌거나 quiet hours 면 푸시 발송 건너뜀 (DB 알림 기록은 유지)
+    // (MG-141) 세션 상태로 발송 종류를 가른다:
+    //   - active            : 기존 콘텐츠 푸시(가족 이름 포함). notifNudge 토글 + quietHours 존중.
+    //   - expired/logged_out: 가족 내용 없는 재참여("다시 로그인") 푸시. 토큰을 보존하므로 발송 가능.
+    // DB 알림 기록은 두 경우 모두 유지(위에서 생성). 빈도는 상단 24h 3회 rate-limit 으로 자연 제한.
     const pushTasks: Promise<void>[] = [];
-    if (target.notifNudge && !isInQuietHours(target)) {
+    if (canSendContentPush(target)) {
+      if (target.notifNudge && !isInQuietHours(target)) {
+        if (target.apnsToken) {
+          pushTasks.push(
+            (async () => {
+              const badgeCount = await notificationService.getUnreadCount(target.id);
+              await pushService.sendApnsPush(target.apnsToken!, nudgeTitle, nudgeBody, 'ANSWER_REQUEST', badgeCount, target.apnsEnvironment, nudgeNotificationId);
+            })().catch((e) => {
+              console.warn('[Nudge] APNs 푸시 실패:', e);
+            })
+          );
+        }
+        if (target.fcmToken) {
+          pushTasks.push(
+            (async () => {
+              const unreadCount = await notificationService.getUnreadCount(target.id);
+              await pushService.sendFcmPush(
+                target.fcmToken!,
+                nudgeTitle,
+                nudgeBody,
+                'ANSWER_REQUEST',
+                undefined,
+                nudgeNotificationId,
+                unreadCount
+              );
+            })().catch((e) => {
+              console.warn('[Nudge] FCM 푸시 실패:', e);
+            })
+          );
+        }
+      }
+    } else if (shouldSendReengagePush(target) && !isInQuietHours(target)) {
+      // 가족 내용(이름/질문) 미포함 재참여 문구. notifNudge 토글은 "활성 세션 콘텐츠 알림" 설정이라
+      // 비활성 상태의 재참여엔 적용하지 않되 quietHours 는 존중.
+      const reMsgs = getPushMessages(target.locale);
       if (target.apnsToken) {
         pushTasks.push(
           (async () => {
             const badgeCount = await notificationService.getUnreadCount(target.id);
-            await pushService.sendApnsPush(target.apnsToken!, nudgeTitle, nudgeBody, 'ANSWER_REQUEST', badgeCount, target.apnsEnvironment, nudgeNotificationId);
+            await pushService.sendApnsPush(target.apnsToken!, reMsgs.reengage.title, reMsgs.reengage.body, 'ANSWER_REQUEST', badgeCount, target.apnsEnvironment, nudgeNotificationId);
           })().catch((e) => {
-            console.warn('[Nudge] APNs 푸시 실패:', e);
+            console.warn('[Nudge] 재참여 APNs 푸시 실패:', e);
           })
         );
       }
@@ -133,17 +171,9 @@ export class NudgeService {
         pushTasks.push(
           (async () => {
             const unreadCount = await notificationService.getUnreadCount(target.id);
-            await pushService.sendFcmPush(
-              target.fcmToken!,
-              nudgeTitle,
-              nudgeBody,
-              'ANSWER_REQUEST',
-              undefined,
-              nudgeNotificationId,
-              unreadCount
-            );
+            await pushService.sendFcmPush(target.fcmToken!, reMsgs.reengage.title, reMsgs.reengage.body, 'ANSWER_REQUEST', undefined, nudgeNotificationId, unreadCount);
           })().catch((e) => {
-            console.warn('[Nudge] FCM 푸시 실패:', e);
+            console.warn('[Nudge] 재참여 FCM 푸시 실패:', e);
           })
         );
       }

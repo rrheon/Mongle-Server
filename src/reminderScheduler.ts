@@ -4,6 +4,7 @@ import { NotificationService } from './services/NotificationService';
 import { PushNotificationService } from './services/PushNotificationService';
 import { getPushMessages } from './utils/i18n/push';
 import { isInQuietHours } from './utils/quietHours';
+import { canSendContentPush } from './utils/pushPolicy';
 
 const notificationService = new NotificationService();
 const pushService = new PushNotificationService();
@@ -85,6 +86,7 @@ export async function sendDailyReminders(): Promise<void> {
           fcmToken: true,
           locale: true,
           notifQuestion: true,
+          sessionState: true,
           quietHoursEnabled: true,
           quietHoursStart: true,
           quietHoursEnd: true,
@@ -227,6 +229,7 @@ export async function sendDailyReminders(): Promise<void> {
   const pushTasks: Promise<unknown>[] = [];
   for (const [userId, user] of userInfoMap) {
     if (!user.notifQuestion) continue;
+    if (!canSendContentPush(user)) continue; // (MG-141) 로그아웃/만료 세션엔 콘텐츠 푸시 금지
     if (isInQuietHours(user)) continue;
     const unanswered = userHasUnanswered.get(userId) ?? false;
     const { title, body } = makeBody(user.locale, unanswered);

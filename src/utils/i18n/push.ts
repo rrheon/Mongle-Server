@@ -27,6 +27,9 @@ interface PushMessages {
     answered: { title: string; body: string };
     unanswered: { title: string; body: string };
   };
+  // MG-141: 로그아웃/세션만료(비활성) 유저용 재참여 문구. 가족 이름·질문 내용을 절대 포함하지 않는다
+  // (로그아웃 상태로 토큰만 살아있는 기기에 가족 콘텐츠가 새는 것을 막기 위한 제약).
+  reengage: { title: string; body: string };
 }
 
 const messagesByLocale: Record<Locale, PushMessages> = {
@@ -63,6 +66,10 @@ const messagesByLocale: Record<Locale, PushMessages> = {
         body: '그룹에 접속해서 답변을 달아봐요',
       },
     },
+    reengage: {
+      title: '몽글',
+      body: '가족이 회원님을 기다리고 있어요. 다시 로그인해 확인해 주세요.',
+    },
   },
   en: {
     newQuestion: {
@@ -97,6 +104,10 @@ const messagesByLocale: Record<Locale, PushMessages> = {
         body: 'Open the group and leave your answer',
       },
     },
+    reengage: {
+      title: 'Mongle',
+      body: 'Your family is waiting for you. Please sign in again to catch up.',
+    },
   },
   ja: {
     newQuestion: {
@@ -130,6 +141,10 @@ const messagesByLocale: Record<Locale, PushMessages> = {
         title: '今日の質問にまだ回答していません',
         body: 'グループに入って回答してみましょう',
       },
+    },
+    reengage: {
+      title: 'Mongle',
+      body: 'ご家族が待っています。もう一度ログインして確認してください。',
     },
   },
 };

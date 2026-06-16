@@ -14,6 +14,7 @@ import { NotificationService } from './NotificationService';
 import { PushNotificationService } from './PushNotificationService';
 import { getPushMessages } from '../utils/i18n/push';
 import { isInQuietHours } from '../utils/quietHours';
+import { canSendContentPush } from '../utils/pushPolicy';
 
 export class QuestionService {
   /**
@@ -672,6 +673,7 @@ async function notifyNewQuestion(familyId: string): Promise<void> {
           fcmToken: true,
           locale: true,
           notifQuestion: true,
+          sessionState: true,
           quietHoursEnabled: true,
           quietHoursStart: true,
           quietHoursEnd: true,
@@ -704,6 +706,7 @@ async function notifyNewQuestion(familyId: string): Promise<void> {
   const pushTasks: Promise<unknown>[] = [];
   for (const m of members) {
     if (!m.notifQuestion) continue;
+    if (!canSendContentPush(m)) continue; // (MG-141) 로그아웃/만료 세션엔 콘텐츠 푸시 금지
     if (isInQuietHours(m)) continue;
     const msgs = getPushMessages(m.locale);
     const title = msgs.newQuestion.title;
