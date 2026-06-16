@@ -211,21 +211,16 @@ export interface ShopCatalogItemDto {
   sortOrder?: number;
 }
 
-export interface EquippedDecorationsDto {
-  head?: string;
-  back?: string;
-  feet?: string;
-}
-
 export interface ShopInventoryResponse {
   ownedDecorationIds: string[];
-  equippedDecorations: EquippedDecorationsDto;
+  // 현재 착용 중인 꾸미기 1개(전역 단일). 미착용이면 생략.
+  equippedDecorationId?: string;
   ownedBackgroundIds: string[];
   appliedBackgroundId?: string;
 }
 
 export interface EquipResponse {
-  equippedDecorations: EquippedDecorationsDto;
+  equippedDecorationId?: string;
 }
 
 export interface PurchaseResponse {
