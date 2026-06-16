@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
@@ -9,54 +9,61 @@ datasource db {
 }
 
 model User {
-  id                 String             @id @default(uuid())
-  userId             String             @unique @map("user_id")
-  email              String             @unique
-  name               String
-  profileImageUrl    String?            @map("profile_image_url")
-  role               UserRole           @default(OTHER)
-  hearts             Int                @default(0)
-  lastHeartGrantedAt DateTime?          @map("last_heart_granted_at")
-  familyId           String?            @map("family_id")
-  createdAt          DateTime           @default(now()) @map("created_at")
-  updatedAt          DateTime           @updatedAt @map("updated_at")
-  moodId             String?            @default("loved") @map("mood_id")
-  apnsToken          String?            @map("apns_token")
+  id                     String             @id @default(uuid())
+  userId                 String             @unique @map("user_id")
+  email                  String             @unique
+  name                   String
+  profileImageUrl        String?            @map("profile_image_url")
+  role                   UserRole           @default(OTHER)
+  hearts                 Int                @default(0)
+  lastHeartGrantedAt     DateTime?          @map("last_heart_granted_at")
+  familyId               String?            @map("family_id")
+  createdAt              DateTime           @default(now()) @map("created_at")
+  updatedAt              DateTime           @updatedAt @map("updated_at")
+  moodId                 String?            @default("loved") @map("mood_id")
+  apnsToken              String?            @map("apns_token")
   // iOS 빌드 환경에 따른 APNs 호스트 선택용. Debug 빌드는 sandbox, TestFlight/Store는 production.
   // 토큰 등록 API에서 클라이언트가 함께 전달하며, 기존 레코드는 v1 배포 유저라 production default.
-  apnsEnvironment    ApnsEnvironment?   @default(production) @map("apns_environment")
-  fcmToken           String?            @map("fcm_token")
+  apnsEnvironment        ApnsEnvironment?   @default(production) @map("apns_environment")
+  fcmToken               String?            @map("fcm_token")
   // Accept-Language 기반 사용자 선호 언어 (ko/en/ja). 서버가 푸시 알림 문구를 다국어로 선택할 때 사용.
-  locale             String?            @map("locale")
+  locale                 String?            @map("locale")
   // 약관/개인정보 동의 버전 — Legal/ 폴더 문서 개정 시 LEGAL_VERSIONS 상수 갱신.
   // 사용자 동의 버전이 현재 버전과 다르면 클라이언트에 needsConsent=true 반환.
-  termsAcceptedVersion   String?   @map("terms_accepted_version")
-  termsAcceptedAt        DateTime? @map("terms_accepted_at")
-  privacyAcceptedVersion String?   @map("privacy_accepted_version")
-  privacyAcceptedAt      DateTime? @map("privacy_accepted_at")
+  termsAcceptedVersion   String?            @map("terms_accepted_version")
+  termsAcceptedAt        DateTime?          @map("terms_accepted_at")
+  privacyAcceptedVersion String?            @map("privacy_accepted_version")
+  privacyAcceptedAt      DateTime?          @map("privacy_accepted_at")
   // 알림 선호도 — 각 타입별 ON/OFF. 기본값 true(수신)
-  notifAnswer            Boolean   @default(true)  @map("notif_answer")    // 구성원 답변 알림
-  notifNudge             Boolean   @default(true)  @map("notif_nudge")     // 재촉하기 알림
-  notifQuestion          Boolean   @default(true)  @map("notif_question")  // 새 질문 알림
-  notifAnswererNudge     Boolean   @default(true)  @map("notif_answerer_nudge") // 내가 답변 후 가족 미답변 알림
-  quietHoursEnabled      Boolean   @default(true)  @map("quiet_hours_enabled")
-  quietHoursStart        String    @default("22:00") @map("quiet_hours_start")
-  quietHoursEnd          String    @default("08:00") @map("quiet_hours_end")
+  notifAnswer            Boolean            @default(true) @map("notif_answer") // 구성원 답변 알림
+  notifNudge             Boolean            @default(true) @map("notif_nudge") // 재촉하기 알림
+  notifQuestion          Boolean            @default(true) @map("notif_question") // 새 질문 알림
+  notifAnswererNudge     Boolean            @default(true) @map("notif_answerer_nudge") // 내가 답변 후 가족 미답변 알림
+  quietHoursEnabled      Boolean            @default(true) @map("quiet_hours_enabled")
+  quietHoursStart        String             @default("22:00") @map("quiet_hours_start")
+  quietHoursEnd          String             @default("08:00") @map("quiet_hours_end")
   // 이메일/비밀번호 로그인용 bcrypt 해시. 소셜 전용 계정이면 NULL.
-  passwordHash           String?   @map("password_hash")
+  passwordHash           String?            @map("password_hash")
   // 상점 — 장착 중인 꾸미기 아이템 슬롯. null 이면 미장착. 아이템 id 는 SHOP_CATALOG 참조.
-  equippedHeadId         String?   @map("equipped_head_id")
-  equippedBackId         String?   @map("equipped_back_id")
-  equippedFeetId         String?   @map("equipped_feet_id")
-  answers            Answer[]
-  memberships        FamilyMembership[]
-  moodRecords        MoodRecord[]
-  notifications      Notification[]
-  accessLogs         UserAccessLog[]
-  refreshTokens      UserRefreshToken[]
-  decorations        UserDecoration[]
-  backgrounds        UserBackground[]
-  family             Family?            @relation(fields: [familyId], references: [id])
+  equippedHeadId         String?            @map("equipped_head_id")
+  equippedBackId         String?            @map("equipped_back_id")
+  equippedFeetId         String?            @map("equipped_feet_id")
+  // (MG-141) 푸시 토큰 ↔ 인증 세션 분리(소프트 로그아웃). 로그아웃해도 apnsToken/fcmToken 은
+  // 보존하고, 이 상태값 하나로 "어떤 푸시를 보낼지"만 게이팅한다 → 의도치 않은 로그아웃에도 재참여 푸시 유지.
+  //  - active     : 정상 로그인 상태. 콘텐츠(가족 내용) 푸시 발송.
+  //  - expired    : 의도치 않은 세션 만료(refresh 실패). 콘텐츠 차단, 재로그인 유도 재참여 푸시만.
+  //  - logged_out : 명시적 로그아웃. 콘텐츠 차단, 재참여 푸시만.
+  // 로그인/토큰 재등록 시 active 로 복귀. 콘텐츠=active만, 재참여=active 아님(토큰 살아있을 때).
+  sessionState           SessionState       @default(active) @map("session_state")
+  answers                Answer[]
+  memberships            FamilyMembership[]
+  moodRecords            MoodRecord[]
+  notifications          Notification[]
+  accessLogs             UserAccessLog[]
+  refreshTokens          UserRefreshToken[]
+  decorations            UserDecoration[]
+  backgrounds            UserBackground[]
+  family                 Family?            @relation(fields: [familyId], references: [id])
 
   @@map("users")
 }
@@ -126,23 +133,23 @@ model UserBackground {
 }
 
 model FamilyMembership {
-  id                String    @id @default(uuid())
-  userId            String    @map("user_id")
-  familyId          String    @map("family_id")
-  role              UserRole  @default(OTHER)
-  joinedAt          DateTime  @default(now()) @map("joined_at")
-  hearts            Int       @default(5)
-  nickname          String?
-  colorId           String?   @default("loved") @map("color_id")
-  nicknameChangedAt DateTime? @map("nickname_changed_at")
-  skippedDate       DateTime? @map("skipped_date") @db.Date
+  id                 String    @id @default(uuid())
+  userId             String    @map("user_id")
+  familyId           String    @map("family_id")
+  role               UserRole  @default(OTHER)
+  joinedAt           DateTime  @default(now()) @map("joined_at")
+  hearts             Int       @default(5)
+  nickname           String?
+  colorId            String?   @default("loved") @map("color_id")
+  nicknameChangedAt  DateTime? @map("nickname_changed_at")
+  skippedDate        DateTime? @map("skipped_date") @db.Date
   // 그룹별 데일리 +1 지급 추적. User.lastHeartGrantedAt 의 글로벌 한계를
   // 보완 — 같은 KST 날짜에 그룹 A→B 전환 시 두 그룹 모두 +1 받게 한다.
   // atomic test-and-set: WHERE { lastHeartGrantedAt: null OR < kstToday } 으로
   // 동시 호출에서도 정확히 1번만 갱신.
   lastHeartGrantedAt DateTime? @map("last_heart_granted_at")
-  family            Family    @relation(fields: [familyId], references: [id])
-  user              User      @relation(fields: [userId], references: [id])
+  family             Family    @relation(fields: [familyId], references: [id])
+  user               User      @relation(fields: [userId], references: [id])
 
   @@unique([userId, familyId])
   @@map("family_memberships")
@@ -248,14 +255,14 @@ model MoodRecord {
 /// 사용자가 email+password 로 가입을 시도하면 6자리 코드를 해시하여 저장한다.
 /// 회원가입 완료(consumed=true) 후에는 cleanup 대상.
 model EmailVerification {
-  id         String   @id @default(uuid())
-  email      String
-  purpose    String   @default("SIGNUP") // 'SIGNUP' | 'LOGIN' 등 확장 여지
-  codeHash   String   @map("code_hash")
-  expiresAt  DateTime @map("expires_at")
-  attempts   Int      @default(0)
-  consumed   Boolean  @default(false)
-  createdAt  DateTime @default(now()) @map("created_at")
+  id        String   @id @default(uuid())
+  email     String
+  purpose   String   @default("SIGNUP") // 'SIGNUP' | 'LOGIN' 등 확장 여지
+  codeHash  String   @map("code_hash")
+  expiresAt DateTime @map("expires_at")
+  attempts  Int      @default(0)
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
 
   @@index([email, purpose])
   @@map("email_verifications")
@@ -291,4 +298,11 @@ enum NotificationType {
 enum ApnsEnvironment {
   sandbox
   production
+}
+
+// (MG-141) 인증 세션 상태. 디바이스 토큰 보존과 무관하게 푸시 게이팅에만 사용.
+enum SessionState {
+  active
+  expired
+  logged_out
 }

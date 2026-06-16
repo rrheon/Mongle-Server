@@ -12,6 +12,7 @@ import { PushNotificationService } from './PushNotificationService';
 import { tryFinalizeDailyQuestion } from './dailyQuestionCompletion';
 import { getPushMessages } from '../utils/i18n/push';
 import { isInQuietHours } from '../utils/quietHours';
+import { canSendContentPush } from '../utils/pushPolicy';
 
 const notificationService = new NotificationService();
 const pushService = new PushNotificationService();
@@ -153,7 +154,7 @@ export class AnswerService {
           user: {
             select: {
               id: true, apnsToken: true, apnsEnvironment: true, fcmToken: true,
-              locale: true, notifAnswer: true,
+              locale: true, notifAnswer: true, sessionState: true,
               quietHoursEnabled: true, quietHoursStart: true, quietHoursEnd: true,
             },
           },
@@ -186,6 +187,8 @@ export class AnswerService {
       const pushTasks: Promise<unknown>[] = [];
       for (const member of otherMembers) {
         if (!member.notifAnswer) continue;
+        // (MG-141) 로그아웃/만료 세션엔 콘텐츠(가족 답변) 푸시 금지 — 토큰은 보존되지만 발송 게이트로 차단.
+        if (!canSendContentPush(member)) continue;
         // quiet hours 면 푸시만 건너뜀. DB 알림은 1단계에서 이미 저장됨.
         if (isInQuietHours(member)) continue;
         const msgs = getPushMessages(member.locale);

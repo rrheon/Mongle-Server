@@ -316,8 +316,8 @@ describe('notifyNewQuestion (MG-29 회귀)', () => {
     // 가족 family-A 의 멤버 2명. 한 명(u2)은 활성 가족이 다른 그룹(B) 이지만
     // family-A 의 FamilyMembership 행은 존재하므로 알림 대상에 포함되어야 한다.
     mockPrismaFamilyMembershipFindMany.mockResolvedValueOnce([
-      { user: { id: 'u1', apnsToken: 'tok-a', apnsEnvironment: 'sandbox', fcmToken: null, locale: 'ko', notifQuestion: true } },
-      { user: { id: 'u2', apnsToken: 'tok-b', apnsEnvironment: 'production', fcmToken: null, locale: 'ko', notifQuestion: true } },
+      { user: { id: 'u1', apnsToken: 'tok-a', apnsEnvironment: 'sandbox', fcmToken: null, locale: 'ko', notifQuestion: true, sessionState: 'active' } },
+      { user: { id: 'u2', apnsToken: 'tok-b', apnsEnvironment: 'production', fcmToken: null, locale: 'ko', notifQuestion: true, sessionState: 'active' } },
     ]);
 
     const { notifyNewQuestion } = await import('../QuestionService');

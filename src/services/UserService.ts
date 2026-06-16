@@ -263,9 +263,10 @@ export class UserService {
     });
 
     // environment 미지정 시(구형 클라이언트) production 가정 — v1 배포 유저의 하위호환 경로.
+    // (MG-141) 토큰 등록 = 활성 세션 신호 → sessionState active 복귀(재참여 푸시 중단, 콘텐츠 재개).
     await prisma.user.update({
       where: { id: user.id },
-      data: { apnsToken: token, apnsEnvironment: environment ?? 'production' },
+      data: { apnsToken: token, apnsEnvironment: environment ?? 'production', sessionState: 'active' },
     });
   }
 
@@ -284,7 +285,8 @@ export class UserService {
       data: { fcmToken: null },
     });
 
-    await prisma.user.update({ where: { id: user.id }, data: { fcmToken: token } });
+    // (MG-141) 토큰 등록 = 활성 세션 신호 → sessionState active 복귀.
+    await prisma.user.update({ where: { id: user.id }, data: { fcmToken: token, sessionState: 'active' } });
   }
 
   /**
