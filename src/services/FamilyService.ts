@@ -252,6 +252,7 @@ export class FamilyService {
           members: m.family.memberships.map((fm) => this.toUserResponseFromMembership(fm)),
           createdAt: m.family.createdAt,
           streakDays,
+          appliedBackgroundId: m.family.appliedBackgroundId ?? undefined,
         };
       })
     );
@@ -610,6 +611,7 @@ export class FamilyService {
       members: family.memberships.map((m) => this.toUserResponseFromMembership(m)),
       createdAt: family.createdAt,
       streakDays,
+      appliedBackgroundId: family.appliedBackgroundId ?? undefined,
     };
   }
 

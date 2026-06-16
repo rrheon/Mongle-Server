@@ -74,10 +74,23 @@ export class AnswerService {
       }
       activeDailyQuestion = { id: requested.id, familyId: requested.familyId };
     } else {
-      const dailyQuestion = await prisma.dailyQuestion.findFirst({
-        where: { questionId: normalizedQuestionId, familyId: { in: familyIds } },
-        orderBy: { date: 'desc' },
-      });
+      // dailyQuestionId 미전송 (구 클라). 멀티그룹 멤버가 같은 question 을 여러 그룹에서
+      // 배정받았을 때, 단순 date desc 폴백은 엉뚱한 그룹의 DQ 를 골라 이미 답변한 그룹과
+      // 충돌(409)하는 일이 있었음. 먼저 user.familyId(현재 활성 그룹) 의 DQ 를 우선 조회해
+      // 정상 경로(활성 그룹에 답변)를 맞추고, 없을 때만 기존 멤버십 전체 date desc 폴백.
+      let dailyQuestion = null;
+      if (user.familyId && familyIds.includes(user.familyId)) {
+        dailyQuestion = await prisma.dailyQuestion.findFirst({
+          where: { questionId: normalizedQuestionId, familyId: user.familyId },
+          orderBy: { date: 'desc' },
+        });
+      }
+      if (!dailyQuestion) {
+        dailyQuestion = await prisma.dailyQuestion.findFirst({
+          where: { questionId: normalizedQuestionId, familyId: { in: familyIds } },
+          orderBy: { date: 'desc' },
+        });
+      }
       if (!dailyQuestion) {
         throw Errors.badRequest('이 질문은 그룹에 배정되지 않았습니다.');
       }
