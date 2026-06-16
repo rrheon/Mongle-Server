@@ -24,12 +24,12 @@ export class ShopService {
   }
 
   /**
-   * 상점 카탈로그 전체 조회 (sortOrder 오름차순). 인증만 필요, 소유 정보 없음.
+   * 상점 카탈로그 전체 조회. 인증만 필요, 소유 정보 없음.
+   * 정렬은 SHOP_CATALOG 배열 순서(= 계약 표 순서)를 그대로 신뢰한다.
+   * sortOrder 는 kind/slot 별로 1부터 재시작·결번이라 전역 단일 정렬이 불가하다(02-qa §3.6).
    */
   getCatalog(): ShopCatalogItemDto[] {
-    return [...SHOP_CATALOG].sort(
-      (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
-    );
+    return [...SHOP_CATALOG];
   }
 
   /**
@@ -145,11 +145,12 @@ export class ShopService {
     slot: DecorationSlot,
     itemId?: string
   ): Promise<EquipResponse> {
-    const user = await this.resolveUser(userId);
-
+    // 슬롯 값 검증을 항상 먼저(해제 경로 포함, 02-qa §3.4).
     if (!VALID_SLOTS.includes(slot)) {
       throw Errors.badRequest('유효하지 않은 슬롯입니다.');
     }
+
+    const user = await this.resolveUser(userId);
 
     const column =
       slot === 'head' ? 'equippedHeadId' : slot === 'back' ? 'equippedBackId' : 'equippedFeetId';

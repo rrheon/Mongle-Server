@@ -75,16 +75,28 @@ beforeEach(() => {
 });
 
 describe('ShopService.getCatalog', () => {
-  it('전체 카탈로그를 반환한다', () => {
+  it('전체 카탈로그를 반환한다(배경 6 + 장식 9 = 15)', () => {
     const catalog = service.getCatalog();
     expect(catalog.length).toBe(SHOP_CATALOG.length);
+    expect(catalog.length).toBe(15);
+    expect(catalog.filter((i) => i.kind === 'background')).toHaveLength(6);
+    expect(catalog.filter((i) => i.kind === 'decoration')).toHaveLength(9);
   });
 
-  it('sortOrder 오름차순으로 정렬된다', () => {
+  it('SHOP_CATALOG 배열 순서를 그대로 보존한다(02-qa §3.6)', () => {
     const catalog = service.getCatalog();
-    for (let i = 1; i < catalog.length; i++) {
-      expect((catalog[i].sortOrder ?? 0)).toBeGreaterThanOrEqual(catalog[i - 1].sortOrder ?? 0);
-    }
+    expect(catalog.map((i) => i.id)).toEqual(SHOP_CATALOG.map((i) => i.id));
+  });
+
+  it('계약 표의 가격/이름과 일치한다(샘플 검증)', () => {
+    const byId = Object.fromEntries(service.getCatalog().map((i) => [i.id, i]));
+    expect(byId['bg_cozy_home']).toMatchObject({ name: '따뜻한 집', price: 0 });
+    expect(byId['bg_spring_field']).toMatchObject({ name: '봄 들판', price: 50 });
+    expect(byId['bg_snow_village']).toMatchObject({ name: '눈오는 마을', price: 50, isSeasonal: true });
+    expect(byId['deco_satin_ribbon']).toMatchObject({ name: '새틴 리본', price: 25, slot: 'head' });
+    expect(byId['deco_santa_hat']).toMatchObject({ price: 60, slot: 'head', isSeasonal: true });
+    // 계약에 없는 bg_forest 가 제거됐는지 확인
+    expect(byId['bg_forest']).toBeUndefined();
   });
 });
 
