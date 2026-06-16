@@ -93,8 +93,8 @@ describe('ShopService.getCatalog', () => {
     expect(byId['bg_cozy_home']).toMatchObject({ name: '따뜻한 집', price: 0 });
     expect(byId['bg_spring_field']).toMatchObject({ name: '봄 들판', price: 50 });
     expect(byId['bg_snow_village']).toMatchObject({ name: '눈오는 마을', price: 50, isSeasonal: true });
-    expect(byId['deco_satin_ribbon']).toMatchObject({ name: '새틴 리본', price: 25, slot: 'head' });
-    expect(byId['deco_santa_hat']).toMatchObject({ price: 60, slot: 'head', isSeasonal: true });
+    expect(byId['deco_satin_ribbon']).toMatchObject({ name: '새틴 리본', price: 50, slot: 'head' });
+    expect(byId['deco_santa_hat']).toMatchObject({ price: 50, slot: 'head', isSeasonal: true });
     // 계약에 없는 bg_forest 가 제거됐는지 확인
     expect(byId['bg_forest']).toBeUndefined();
   });
@@ -175,14 +175,14 @@ describe('ShopService.purchase', () => {
     mockPrismaUserFindUnique.mockResolvedValue(mockUser);
     mockPrismaUserDecorationFindUnique.mockResolvedValue(null); // 미보유
     mockPrismaFamilyMembershipUpdateMany.mockResolvedValue({ count: 1 });
-    mockPrismaFamilyMembershipFindUnique.mockResolvedValue({ hearts: 35 });
+    mockPrismaFamilyMembershipFindUnique.mockResolvedValue({ hearts: 50 });
 
-    const result = await service.purchase('kakao:123', 'deco_flower_crown'); // price 35
+    const result = await service.purchase('kakao:123', 'deco_flower_crown'); // price 50
     expect(mockPrismaFamilyMembershipUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { hearts: { decrement: 35 } } })
+      expect.objectContaining({ data: { hearts: { decrement: 50 } } })
     );
     expect(mockPrismaUserDecorationCreate).toHaveBeenCalled();
-    expect(result.heartsRemaining).toBe(35);
+    expect(result.heartsRemaining).toBe(50);
   });
 
   it('이미 소유한 아이템은 멱등 — 재차감/create 없이 현재 하트 반환', async () => {
@@ -220,7 +220,7 @@ describe('ShopService.purchase', () => {
     mockPrismaFamilyMembershipUpdateMany.mockResolvedValue({ count: 1 });
     mockPrismaFamilyMembershipFindUnique.mockResolvedValue({ hearts: 0 });
 
-    await service.purchase('kakao:123', 'bg_beach'); // price 35
+    await service.purchase('kakao:123', 'bg_beach'); // price 50
     expect(mockPrismaUserBackgroundCreate).toHaveBeenCalledWith(
       expect.objectContaining({ data: { userId: 'db-user-id', itemId: 'bg_beach' } })
     );
