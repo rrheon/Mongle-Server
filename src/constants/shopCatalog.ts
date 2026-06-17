@@ -8,7 +8,7 @@
 
 export type ShopItemKind = 'background' | 'decoration';
 
-export type DecorationSlot = 'head' | 'back' | 'feet';
+export type DecorationSlot = 'head' | 'back' | 'feet' | 'hand';
 
 export interface ShopCatalogItem {
   id: string;
@@ -38,7 +38,7 @@ export const SHOP_CATALOG: ShopCatalogItem[] = [
   { id: 'deco_flower_crown', kind: 'decoration', name: '들꽃 화관', price: 50, slot: 'head', sortOrder: 1 },
   { id: 'deco_star_halo', kind: 'decoration', name: '별 후광', price: 50, slot: 'head', sortOrder: 2 },
   { id: 'deco_satin_ribbon', kind: 'decoration', name: '새틴 리본', price: 50, slot: 'head', sortOrder: 3 },
-  { id: 'deco_balloon_bunch', kind: 'decoration', name: '풍선 다발', price: 50, slot: 'head', sortOrder: 4 },
+  { id: 'deco_balloon_bunch', kind: 'decoration', name: '풍선 다발', price: 50, slot: 'hand', sortOrder: 4 },
   { id: 'deco_santa_hat', kind: 'decoration', name: '산타 모자', price: 50, slot: 'head', isSeasonal: true, sortOrder: 5 },
   { id: 'deco_angel_wings', kind: 'decoration', name: '천사 날개', price: 50, slot: 'back', sortOrder: 1 },
   { id: 'deco_cape', kind: 'decoration', name: '망토', price: 50, slot: 'back', sortOrder: 2 },
