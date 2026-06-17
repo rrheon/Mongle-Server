@@ -198,7 +198,7 @@ export interface FamilyAnswersResponse {
 // ============================================
 export type ShopItemKind = 'background' | 'decoration';
 
-export type DecorationSlot = 'head' | 'back' | 'feet';
+export type DecorationSlot = 'head' | 'back' | 'feet' | 'hand';
 
 export interface ShopCatalogItemDto {
   id: string;
