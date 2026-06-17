@@ -16,7 +16,6 @@ import {
   ShopInventoryResponse,
   EquipResponse,
   PurchaseResponse,
-  DecorationSlot,
 } from '../models';
 
 interface PurchaseRequest {
@@ -24,8 +23,7 @@ interface PurchaseRequest {
 }
 
 interface EquipRequest {
-  slot: DecorationSlot;
-  /** 미전달 시 해당 슬롯 장착 해제 */
+  /** 미전달 시 장착 해제(전역 단일) */
   itemId?: string;
 }
 
@@ -85,7 +83,7 @@ export class ShopController extends Controller {
     @Request() req: AuthRequest,
     @Body() body: EquipRequest
   ): Promise<EquipResponse> {
-    return this.shopService.equipDecoration(req.user.userId, body.slot, body.itemId);
+    return this.shopService.equipDecoration(req.user.userId, body.itemId);
   }
 
   /**

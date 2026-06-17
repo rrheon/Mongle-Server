@@ -50,9 +50,7 @@ const mockUser = {
   id: 'db-user-id',
   userId: 'kakao:123',
   familyId: 'family-id',
-  equippedHeadId: null as string | null,
-  equippedBackId: null as string | null,
-  equippedFeetId: null as string | null,
+  equippedDecorationId: null as string | null,
 };
 
 beforeEach(() => {
@@ -120,8 +118,7 @@ describe('ShopService.getInventory', () => {
     mockPrismaUserFindUnique.mockResolvedValue({
       ...mockUser,
       familyId: null,
-      equippedHeadId: 'deco_flower_crown',
-      equippedFeetId: 'deco_sneakers',
+      equippedDecorationId: 'deco_flower_crown',
     });
     mockPrismaUserDecorationFindMany.mockResolvedValue([
       { itemId: 'deco_flower_crown' },
@@ -129,10 +126,15 @@ describe('ShopService.getInventory', () => {
     ]);
 
     const inv = await service.getInventory('kakao:123');
-    expect(inv.equippedDecorations.head).toBe('deco_flower_crown');
-    expect(inv.equippedDecorations.feet).toBe('deco_sneakers');
-    expect(inv.equippedDecorations.back).toBeUndefined();
+    expect(inv.equippedDecorationId).toBe('deco_flower_crown');
     expect(inv.ownedDecorationIds).toEqual(['deco_flower_crown', 'deco_sneakers']);
+  });
+
+  it('미착용이면 equippedDecorationId 키가 생략된다', async () => {
+    mockPrismaUserFindUnique.mockResolvedValue({ ...mockUser, familyId: null });
+
+    const inv = await service.getInventory('kakao:123');
+    expect(inv.equippedDecorationId).toBeUndefined();
   });
 
   it('본인이 소유한 배경 + 그룹 적용 배경을 포함한다', async () => {
@@ -228,46 +230,68 @@ describe('ShopService.purchase', () => {
 });
 
 describe('ShopService.equipDecoration', () => {
-  it('보유한 아이템을 장착하면 슬롯에 반영된다', async () => {
+  it('보유한 아이템을 장착하면 equippedDecorationId 에 반영된다', async () => {
     mockPrismaUserFindUnique.mockResolvedValue(mockUser);
     mockPrismaUserDecorationFindUnique.mockResolvedValue({ id: 'owned' });
     mockPrismaUserUpdate.mockResolvedValue({
       ...mockUser,
-      equippedHeadId: 'deco_flower_crown',
+      equippedDecorationId: 'deco_flower_crown',
     });
 
-    const result = await service.equipDecoration('kakao:123', 'head', 'deco_flower_crown');
+    const result = await service.equipDecoration('kakao:123', 'deco_flower_crown');
     expect(mockPrismaUserUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { equippedHeadId: 'deco_flower_crown' } })
+      expect.objectContaining({ data: { equippedDecorationId: 'deco_flower_crown' } })
     );
-    expect(result.equippedDecorations.head).toBe('deco_flower_crown');
+    expect(result.equippedDecorationId).toBe('deco_flower_crown');
+  });
+
+  it('다른 아이템을 장착하면 이전 장착이 교체된다(단일 컬럼이 불변식을 보장)', async () => {
+    // 이미 deco_flower_crown(head) 착용 중인 상태에서 deco_sneakers(feet) 장착.
+    mockPrismaUserFindUnique.mockResolvedValue({
+      ...mockUser,
+      equippedDecorationId: 'deco_flower_crown',
+    });
+    mockPrismaUserDecorationFindUnique.mockResolvedValue({ id: 'owned' });
+    mockPrismaUserUpdate.mockResolvedValue({
+      ...mockUser,
+      equippedDecorationId: 'deco_sneakers',
+    });
+
+    const result = await service.equipDecoration('kakao:123', 'deco_sneakers');
+    // 단일 컬럼 덮어쓰기라 이전 장착은 별도 해제 없이 자동 교체된다.
+    expect(mockPrismaUserUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { equippedDecorationId: 'deco_sneakers' } })
+    );
+    expect(result.equippedDecorationId).toBe('deco_sneakers');
   });
 
   it('미보유 아이템 장착은 에러를 던진다', async () => {
     mockPrismaUserFindUnique.mockResolvedValue(mockUser);
     mockPrismaUserDecorationFindUnique.mockResolvedValue(null);
     await expect(
-      service.equipDecoration('kakao:123', 'head', 'deco_flower_crown')
+      service.equipDecoration('kakao:123', 'deco_flower_crown')
     ).rejects.toThrow('보유하지 않은 아이템입니다.');
   });
 
-  it('슬롯이 일치하지 않으면 에러를 던진다', async () => {
+  it('존재하지 않는 itemId 는 에러를 던진다', async () => {
     mockPrismaUserFindUnique.mockResolvedValue(mockUser);
-    // deco_flower_crown 은 head 인데 feet 슬롯에 장착 시도
     await expect(
-      service.equipDecoration('kakao:123', 'feet', 'deco_flower_crown')
-    ).rejects.toThrow('슬롯이 일치하지 않습니다.');
+      service.equipDecoration('kakao:123', 'nope')
+    ).rejects.toThrow('존재하지 않는 장식입니다.');
   });
 
-  it('itemId 미전달 시 슬롯을 해제한다(null)', async () => {
-    mockPrismaUserFindUnique.mockResolvedValue({ ...mockUser, equippedHeadId: 'deco_flower_crown' });
-    mockPrismaUserUpdate.mockResolvedValue({ ...mockUser, equippedHeadId: null });
+  it('itemId 미전달 시 장착을 해제한다(null)', async () => {
+    mockPrismaUserFindUnique.mockResolvedValue({
+      ...mockUser,
+      equippedDecorationId: 'deco_flower_crown',
+    });
+    mockPrismaUserUpdate.mockResolvedValue({ ...mockUser, equippedDecorationId: null });
 
-    const result = await service.equipDecoration('kakao:123', 'head');
+    const result = await service.equipDecoration('kakao:123');
     expect(mockPrismaUserUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { equippedHeadId: null } })
+      expect.objectContaining({ data: { equippedDecorationId: null } })
     );
-    expect(result.equippedDecorations.head).toBeUndefined();
+    expect(result.equippedDecorationId).toBeUndefined();
   });
 });
 

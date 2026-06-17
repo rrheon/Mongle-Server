@@ -2,15 +2,11 @@ import prisma from '../utils/prisma';
 import {
   ShopCatalogItemDto,
   ShopInventoryResponse,
-  EquippedDecorationsDto,
   EquipResponse,
   PurchaseResponse,
-  DecorationSlot,
 } from '../models';
 import { Errors } from '../middleware/errorHandler';
 import { SHOP_CATALOG, CATALOG_BY_ID, DEFAULT_BACKGROUND_ID } from '../constants/shopCatalog';
-
-const VALID_SLOTS: DecorationSlot[] = ['head', 'back', 'feet'];
 
 export class ShopService {
   /**
@@ -46,11 +42,6 @@ export class ShopService {
     });
     const ownedDecorationIds = decorations.map((d) => d.itemId);
 
-    const equippedDecorations: EquippedDecorationsDto = {};
-    if (user.equippedHeadId) equippedDecorations.head = user.equippedHeadId;
-    if (user.equippedBackId) equippedDecorations.back = user.equippedBackId;
-    if (user.equippedFeetId) equippedDecorations.feet = user.equippedFeetId;
-
     // 배경 소유는 개인 단위(본인이 구매한 것만). 적용(appliedBackgroundId)은 그룹 공유지만,
     // 본인이 소유한 배경만 적용할 수 있으므로 ownedBackgroundIds 는 user 기준으로 집계한다.
     const ownedBackgroundIds: string[] = [DEFAULT_BACKGROUND_ID];
@@ -70,9 +61,10 @@ export class ShopService {
 
     const response: ShopInventoryResponse = {
       ownedDecorationIds,
-      equippedDecorations,
       ownedBackgroundIds,
     };
+    // 미착용(null/undefined)이면 키 자체를 생략.
+    if (user.equippedDecorationId) response.equippedDecorationId = user.equippedDecorationId;
     // appliedBackgroundId 가 null/undefined 면 키 자체를 생략.
     if (appliedBackgroundId) response.appliedBackgroundId = appliedBackgroundId;
     return response;
@@ -137,31 +129,17 @@ export class ShopService {
   }
 
   /**
-   * 꾸미기 장착/해제. itemId 미전달 시 해당 슬롯 해제(null).
-   * 장착 시 아이템 종류·슬롯 일치 + 소유 여부를 검증한다.
+   * 꾸미기 장착/해제 — 전역 단일. itemId 미전달 시 해제(null).
+   * 장착 시 아이템 종류(decoration) + 소유 여부만 검증한다. slot 은 더 이상
+   * 배타그룹 선택자가 아니므로 검증/매핑하지 않는다(단일 컬럼 덮어쓰기).
    */
-  async equipDecoration(
-    userId: string,
-    slot: DecorationSlot,
-    itemId?: string
-  ): Promise<EquipResponse> {
-    // 슬롯 값 검증을 항상 먼저(해제 경로 포함, 02-qa §3.4).
-    if (!VALID_SLOTS.includes(slot)) {
-      throw Errors.badRequest('유효하지 않은 슬롯입니다.');
-    }
-
+  async equipDecoration(userId: string, itemId?: string): Promise<EquipResponse> {
     const user = await this.resolveUser(userId);
-
-    const column =
-      slot === 'head' ? 'equippedHeadId' : slot === 'back' ? 'equippedBackId' : 'equippedFeetId';
 
     if (itemId) {
       const item = CATALOG_BY_ID[itemId];
       if (!item || item.kind !== 'decoration') {
-        throw Errors.badRequest('유효하지 않은 꾸미기 아이템입니다.');
-      }
-      if (item.slot !== slot) {
-        throw Errors.badRequest('아이템 슬롯이 일치하지 않습니다.');
+        throw Errors.badRequest('존재하지 않는 장식입니다.');
       }
       const owned = await prisma.userDecoration.findUnique({
         where: { userId_itemId: { userId: user.id, itemId } },
@@ -171,15 +149,10 @@ export class ShopService {
 
     const updated = await prisma.user.update({
       where: { id: user.id },
-      data: { [column]: itemId ?? null },
+      data: { equippedDecorationId: itemId ?? null },
     });
 
-    const equippedDecorations: EquippedDecorationsDto = {};
-    if (updated.equippedHeadId) equippedDecorations.head = updated.equippedHeadId;
-    if (updated.equippedBackId) equippedDecorations.back = updated.equippedBackId;
-    if (updated.equippedFeetId) equippedDecorations.feet = updated.equippedFeetId;
-
-    return { equippedDecorations };
+    return { equippedDecorationId: updated.equippedDecorationId ?? undefined };
   }
 
   /**
